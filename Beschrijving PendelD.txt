@@ -1,0 +1,2 @@
+PendelD pendel automaat voor digitale locomotieven met DCC decoder
+
