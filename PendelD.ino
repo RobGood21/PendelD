@@ -9,9 +9,16 @@
 
 //libraries
 #include <EEPROM.h>
-
+#define TrueBit OCR2A = 115
+#define FalseBit OCR2A = 230
 
 //declarations
+byte DCC_fase;
+byte count_preample;
+byte DCC_data[5]; //bevat te verzenden DCC bytes, current DCC commands
+byte DCC_count; //aantal bytes current DCC command
+
+//eventeel nog een buffer om meerdere DCC commandoos te hebben bij bv. 2 locs of accessoire sturing
 
 
 //temps
@@ -45,27 +52,33 @@ ISR(TIMER2_COMPA_vect) {
 	if (bitRead(GPIOR0, 0) == false) { //full bit
 
 		//bepaal volgende bit
+		switch (DCC_fase) {
+		case 0: //niks doen alleen 1 bits zenden 	
+			TrueBit;
+			break;
+		case 1: //preample zenden
+			count_preample++;
+			if (count_preample > 13) {
+				count_preample = 0;
+				DCC_fase = 2;
+				FalseBit; 
+			}
+			break;
+		case 2: //data zenden
+			break;
+		}
 
 
 		GPIOR0 ^= (1 << 1);
 		//if (bitRead(GPIOR0, 1) == true) {
 
-			if (GPIOR0 & (1 << 1)){  //bitwise testing bit 1 in GPIOR0
-			OCR2A = 115;
+		if (GPIOR0 & (1 << 1)) {  //bitwise testing bit 1 in GPIOR0
+			TrueBit;
 		}
 		else {
-			OCR2A = 230;
+			FalseBit;
 		}
 	}
-
-
-//countpuls++;
-
-//if (millis() - time > 1000) { //count 10sec
-//	Serial.println(countpuls);
-//	time = millis();
-//	countpuls = 0;
-//}
 }
 
 void loop()
