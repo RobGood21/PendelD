@@ -1,2 +1,3 @@
 PendelD pendel automaat voor digitale locomotieven met DCC decoder
 
+PB3; PIN 11  is compare match register timer 2 gebruiken voor DCC output PIN
