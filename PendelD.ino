@@ -12,11 +12,16 @@
 #define TrueBit OCR2A = 115
 #define FalseBit OCR2A = 230
 
-//declarations
-byte DCC_fase;
+//declarations, count tellers, 
+
 byte count_preample;
-byte DCC_data[5]; //bevat te verzenden DCC bytes, current DCC commands
-byte DCC_count; //aantal bytes current DCC command
+byte count_byte;
+byte count_bit;
+byte count_slow;
+byte dcc_fase;
+byte dcc_data[5]; //bevat te verzenden DCC bytes, current DCC commando
+byte dcc_aantalBytes; //aantal bytes current van het DCC commando
+byte sw_status; //laatste stand van switches
 
 //eventeel nog een buffer om meerdere DCC commandoos te hebben bij bv. 2 locs of accessoire sturing
 
@@ -29,8 +34,14 @@ volatile unsigned long countpuls;
 void setup() {
 	Serial.begin(9600);
 
-
+	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
+	PORTC |= (15 << 0); //set pin A0, A1 pull up
+	DDRB |= (1 << 0); //PIN8 as output enable DCC
+	PORTB |= (1 << 0); //set pin8 high
+
+
+	sw_status = 0xFF;
 
 	//interrupt register settings
 	//TCCR2A – Timer/Counter Control Register A
@@ -43,46 +54,101 @@ void setup() {
 
 	//OCR2A – Output Compare Register A tijdsduur 0~255
 	OCR2A = 115; //geeft een puls van 58us
-
 	TIMSK2 |= (1 << 1);
 }
 
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
-	if (bitRead(GPIOR0, 0) == false) { //full bit
+	//if (bitRead(GPIOR0, 0) == false) { //full bit
 
+	if (~GPIOR0 & (1 << 0)) {
 		//bepaal volgende bit
-		switch (DCC_fase) {
+		switch (dcc_fase) {
 		case 0: //niks doen alleen 1 bits zenden 	
 			TrueBit;
 			break;
+
 		case 1: //preample zenden
 			count_preample++;
 			if (count_preample > 13) {
 				count_preample = 0;
-				DCC_fase = 2;
-				FalseBit; 
+				dcc_fase = 2;
+				FalseBit;
+				count_bit = 7;
+				count_byte = 0;
 			}
 			break;
-		case 2: //data zenden
+		case 2: //send dcc_data
+			//MSB first; LSB last
+			if (count_bit < 8) {
+				if (dcc_data[count_byte] & (1 << count_bit)) { //als het [countbit] van het byte[countbyte] waar is dan>> 
+					TrueBit;
+				}
+				else {
+					FalseBit;
+				}
+				count_bit--;
+			}
+			else { //count_bit 8 or more
+				count_bit = 7;
+				if (count_byte <= dcc_aantalBytes) {
+					count_byte ++; //next byte
+					FalseBit;
+				}
+				else { //command send reset
+					dcc_fase = 0; 
+					TrueBit;
+				}
+			}
 			break;
-		}
 
-
-		GPIOR0 ^= (1 << 1);
-		//if (bitRead(GPIOR0, 1) == true) {
-
-		if (GPIOR0 & (1 << 1)) {  //bitwise testing bit 1 in GPIOR0
-			TrueBit;
-		}
-		else {
+		case 10:
+			//testing
 			FalseBit;
+			break;
 		}
 	}
 }
 
-void loop()
-{
+void SW_exe() {
+	byte poort; byte changed;
+	poort = PINC;
+	changed = poort ^ sw_status;
+	for (byte i; i < 4; i++) {
+		if (changed & (1 << i) & ~poort & (1 << i)) {
+			SW_on(i);
+		}
+	}
+	sw_status = poort;
+}
+void SW_on(byte sw) {
+	Serial.println(sw);
 
+	switch (sw) {
+	case 0:
+		PINB |= (1 << 0);
+		break;
+	case 1:
 
+		GPIOR0 ^= (1 << 1);
+
+		if (GPIOR0 & (1 << 1)) {
+			dcc_fase = 0;
+		}
+		else {
+			dcc_fase = 10;
+		}
+		break;
+	case 2:
+		break;
+	case 3:
+		break;
+	}
+}
+void loop() {
+	count_slow++;
+	if (count_slow == 0) {
+		//slow events
+		SW_exe();
+	}
 }
