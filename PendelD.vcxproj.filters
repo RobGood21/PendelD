@@ -15,11 +15,11 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="PendelD.ino" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="__vm\.PendelD.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PendelDCC.ino" />
   </ItemGroup>
 </Project>

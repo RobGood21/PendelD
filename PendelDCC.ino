@@ -17,6 +17,8 @@
 byte count_preample;
 byte count_byte;
 byte count_bit;
+byte count_command;
+
 unsigned int count_slow;
 byte dcc_fase;
 byte dcc_data[5]; //bevat te verzenden DCC bytes, current DCC commando
@@ -24,12 +26,17 @@ byte dcc_aantalBytes; //aantal bytes current van het DCC commando
 byte sw_status; //laatste stand van switches
 
 //eventeel nog een buffer om meerdere DCC commandoos te hebben bij bv. 2 locs of accessoire sturing
+byte dcc_buf1[5];
+byte dcc_buf2[5];
+byte dcc_buf3[5];
+byte dcc_bufreg[5];
 
 
 //temps
 volatile unsigned long time;
 volatile unsigned long countpuls;
 unsigned long time_slow;
+byte functies;
 
 
 void setup() {
@@ -58,9 +65,12 @@ void setup() {
 	TIMSK2 |= (1 << 1);
 
 
-	DCC_command();
+	
 
 	PORTB |= (1 << 0); //set pin8 high
+	functies = B10000000;
+	DCC_command();
+
 }
 
 ISR(TIMER2_COMPA_vect) {
@@ -117,11 +127,24 @@ ISR(TIMER2_COMPA_vect) {
 	}
 }
 
+
+void DCC_command_nieuw() {
+	
+
+
+	count_command++;
+	//if(count_command > 4)count_command=0)
+}
+
+
+
 void DCC_command() {
 	dcc_aantalBytes = 3;
 	//dcc_data
 	dcc_data[0] = B00000110; //adres 6
-	dcc_data[1] = B01110001;
+	//dcc_data[0] = B00001110; //adres 14
+	//dcc_data[0] = B00011100; //adres 28
+	dcc_data[1] = B01110001; // functies;
 	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 
 }
@@ -141,9 +164,17 @@ void SW_exe() {
 	//DCC_command();
 	dcc_fase = 1;
 	count_preample = 0; //niet nodig?
+
 }
-void SW_on(byte sw) {
-	Serial.println(sw);
+void SW_on_F(byte sw) { //functions
+		dcc_data[1] ^= (1 << sw+1);
+
+	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
+	Serial.println(dcc_data[1], BIN);
+}
+
+void SW_on(byte sw) {  //drive
+	//Serial.println(sw);
 
 	switch (sw) {
 	case 0:
@@ -162,20 +193,23 @@ void SW_on(byte sw) {
 	case 3:
 		break;
 	}
+	Serial.println(dcc_data[1], BIN);
+
 }
 void loop() {
+/*
 
 	if (millis() - time_slow > 20) {
 		time_slow = millis();
 		SW_exe();
 	}
-
-	/*
+*/
+	
 	
 	count_slow++;
 	if (count_slow == 0) {
 		//slow events
 		SW_exe();
 	}
-*/
+
 }
