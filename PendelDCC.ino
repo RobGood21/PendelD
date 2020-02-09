@@ -3,7 +3,7 @@
 	Created:	2020
 	Author:     Rob Antonisse
 
-	Arduino programma voor een pendelautomaat voor digitale locomotieven
+	Arduino programma voor een pendelautomaat voor digitale DCC locomotieven
 
 */
 
