@@ -3,9 +3,6 @@
  Created:	2/10/2020 9:35:52 PM
  Author:	Rob Antonisse
 
-
-
-
 */
 
 
@@ -39,11 +36,14 @@ void setup() {
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
 	display.setCursor(10, 10);
-	display.println("www.wisselmotor.nl");
+	display.println("jo");
 	
 	//Use the drawLine(x1, y1, x2, y2, color) method to create a line.The(x1, y1) coordinates 
 	//indicate the start of the line, and the(x2, y2) coordinates indicates where the line ends.
 	display.display();
+
+
+	/*
 	delay(1000);	
 	display.drawLine(10, 20, 115, 20, WHITE);
 	display.display();
@@ -53,6 +53,7 @@ void setup() {
 	//you need to specify the width, height and color:
 	display.drawRect(5, 25, 100, 20, WHITE);
 	display.display();
+*/
 }
 
 // the loop function runs over and over again until power down or reset

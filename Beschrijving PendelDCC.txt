@@ -14,3 +14,4 @@ bit0	Flag bit half in ISR
 bit1	Drive command true, function command false
 bit2	CV programming active
 bit3	Loc adres programming active
+bit4	Switch reading port C or port D

@@ -9,6 +9,15 @@
 
 //libraries
 #include <EEPROM.h>
+
+//display 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
 #define TrueBit OCR2A = 115
 #define FalseBit OCR2A = 230
 
@@ -24,7 +33,8 @@ int count_slow;
 byte dcc_fase;
 byte dcc_data[5]; //bevat te verzenden DCC bytes, current DCC commando
 byte dcc_aantalBytes; //aantal bytes current van het DCC commando
-byte sw_status; //laatste stand van switches
+byte sw_statusC; //laatste stand van switches op C port
+byte sw_statusD; //D port
 
 byte dcc_cv[3];
 
@@ -43,29 +53,54 @@ byte newlocadres = 10;
 
 void setup() {
 	Serial.begin(9600);
+	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
-	PORTC |= (15 << 0); //set pin A0, A1 pull up
+	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
+	DDRD &= ~(1 << 7);
+	PORTD |= (1 << 7); //set PIN7 pullup register
+
 	DDRB |= (1 << 0); //PIN8 as output enable DCC
 
-	sw_status = 0xFF;
+	sw_statusC = 0xFF;
+	sw_statusD = 0xFF;
 
 	//interrupt register settings
 	//TCCR2A – Timer/Counter Control Register A
 	TCCR2A = 0x00; //clear register
 	TCCR2A |= (1 << 6);//Toggle OC2A on Compare Match
 	TCCR2A |= (1 << 1); //CTC mode clear timer at compare match
-	//TCCR2B – Timer / Counter Control Register B
 	TCCR2B = 2; //set register timer 2 prescaler 8
-	//TCCR2B|=(1 << 0); //set timer 
-
-	//OCR2A – Output Compare Register A tijdsduur 0~255
-	//OCR2A = 115; //geeft een puls van 58us
 	TIMSK2 |= (1 << 1);
 
 	PORTB |= (1 << 0); //set pin8 high
 	functies = B10000000;
 	//DCC_command();
+	//delay(1000);
+	DSP_start();
+	//******display start
+
+	//display.clearDisplay();
+	//display.setTextSize(1);
+	//display.setTextColor(WHITE);
+	//display.setCursor(10, 10);
+	//display.println("www.wisselmotor.nl");
+	//display.display();
+
+	//Use the drawLine(x1, y1, x2, y2, color) method to create a line.The(x1, y1) coordinates 
+	//indicate the start of the line, and the(x2, y2) coordinates indicates where the line ends.
+
+	//delay(1000);
+	//display.drawLine(10, 20, 115, 20, WHITE);
+	//display.display();
+	//delay(1000);
+	//The drawRect(x, y, width, height, color) provides an easy way to draw a rectangle.
+	//The(x, y) coordinates indicate the top left corner of the rectangle.Then, 
+	//you need to specify the width, height and color:
+	//display.drawRect(5, 25, 100, 20, WHITE);
+	//display.display();
+	//***display end
 
 }
 
@@ -124,10 +159,10 @@ void PRG_locadres(byte newadres, byte all) {
 
 }
 
-void PRG_cv(byte oldadres,byte cv,byte value) { //CV programming
+void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
-	cv = cv-1;
+	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
 	dcc_data[0] = oldadres; // B00000000; //
 	//dcc_data[0] = 0x00; //broadcast adres??
@@ -136,7 +171,8 @@ void PRG_cv(byte oldadres,byte cv,byte value) { //CV programming
 	dcc_data[3] = value; //adres 6
 	dcc_data[4] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3];
 	dcc_aantalBytes = 4;
-	count_repeat = 4;}
+	count_repeat = 4;
+}
 
 void DCC_command() { //nieuwe
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
@@ -160,51 +196,121 @@ void DCC_command() { //nieuwe
 	}
 }
 
+
+
 void SW_exe() {
 	byte poort; byte changed;
-	poort = PINC;
-	changed = poort ^ sw_status;
-	for (byte i; i < 4; i++) {
-		if (changed & (1 << i) & ~poort & (1 << i)) {
-			SW_on(i);
+	GPIOR0 ^= (1 << 4);
+
+	if (GPIOR0 & (1 << 4)) {
+		poort = PIND;
+		changed = poort ^ sw_statusD;
+		for (byte i=7; i > 6; i--) {
+			if (changed & (1 << i) & ~poort & (1 << i)) {
+				SW_on(7 - i + 4);
+			}
 		}
+		sw_statusD = poort;
 	}
-	sw_status = poort;
+	else {
+		poort = PINC;
+		changed = poort ^ sw_statusC;
+		for (byte i=0; i < 4; i++) {
+			if (changed & (1 << i) & ~poort & (1 << i)) {
+				SW_on(i);
+			}
+		}
+		sw_statusC = poort;
+	}
+}
 
-
-
-	//DCC
-	DCC_command();
-	dcc_fase = 1;
-	count_preample = 0; //niet nodig?
+void SW_double() { //called from SW_exe when sw0 and sw3 is pressed
 
 }
+
 void SW_on(byte sw) { //nieuw
+	Serial.println(sw);
 	switch (sw) {
 	case 0:
-		PINB |= (1 << 0); //no DCC
+			loc_speed = B01101110; //drive	
 		break;
 	case 1:
-		loc_speed = B01101110; //drive
-		break;
-	case 2:
 		loc_speed = B01100000; //stop
 		break;
+	case 2:
+loc_function ^= (1 << 4); //headlights
+		break;
 	case 3:
-		PRG_cv(10,1,6);
-		//loc_function ^= (1 << 4); //headlights
+		loc_function ^= (1 << 1); //cabin
+		//PRG_cv(10,1,6);
+		//
+		//display.clearDisplay();
+		//DSP_buttons(0);
+		break;
+
+	case 4:
+		PINB |= (1 << 0); //no DCC
 		break;
 	}
+}
+
+void DSP_start() {
+	display.clearDisplay();
+
+	display.setTextSize(1);
+	display.setTextColor(WHITE);
+	display.setCursor(10, 0);
+	display.print("www.wisselmotor.nl");
+	display.drawLine(1, 10, 127, 10, WHITE);
+	display.setTextSize(2);
+	display.setCursor(3, 24);
+	display.print("PenDel DCC");
+	display.display();
+	DSP_buttons(0);
+}
+
+void DSP_buttons(byte mode) {
+	//sets mode in display
+	display.drawRect(0, 53, 128, 11, WHITE);
+	switch (mode) {
+	case 0: //
+		display.setTextSize(1);
+		display.setTextColor(WHITE);
+		display.setCursor(3, 55);
+		display.println("Start  <>   FL   F1");
+		break;
+	default:
+		display.setTextSize(2);
+		display.setTextColor(WHITE);
+		display.setCursor(10, 20);
+		display.print("mode: ");
+		display.println(mode);
+		break;
+	}
+	display.display();
+}
+
+void DSP_txt() {
+	//******display start
+	display.clearDisplay();
+	display.setTextSize(1);
+	display.setTextColor(WHITE);
+	display.setCursor(10, 10);
+	display.print("headlights: ");
+	display.println(random(0, 127));
+	display.display();
 }
 
 void loop() {
 
 	//slow events timer
 	count_slow++;
-	if (count_slow > 20000) { //10000 makes frequency of command sending important 5000 is too fast
+	if (count_slow > 10000) { //10000 makes frequency of command sending important 5000 is too fast
 		count_slow = 0;
 		//slow events
-		SW_exe();
+		SW_exe(); //switches
+		//start DCC command transmit
+		DCC_command();
+		dcc_fase = 1;
 	}
-
 }
