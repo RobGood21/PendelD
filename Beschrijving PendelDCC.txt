@@ -15,3 +15,5 @@ bit1	Drive command true, function command false
 bit2	CV programming active
 bit3	Loc adres programming active
 bit4	Switch reading port C or port D
+bit5	Programmode true, false pendel bedrijf
+bit6	Program parameter false/ value true

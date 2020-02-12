@@ -16,6 +16,14 @@
 #include <Adafruit_SSD1306.h>
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+//teksten
+#define regel1 DSP_settxt(0, 1, 2)
+#define regel2 DSP_settxt(0, 21, 2)
+
+#define txt_dcc "DCC adres " 
+#define txt_lok "loco " 
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define TrueBit OCR2A = 115
@@ -38,10 +46,12 @@ byte sw_statusD; //D port
 
 byte dcc_cv[3];
 
-byte loc_adres = 6; //moet van EEPROM komen
+byte loc_adres[2]; //moet van EEPROM komen
 byte loc_speed;
 byte loc_function = B10000000; //moet van EEPROM komen
 
+byte PRG_fase;
+byte PRG_qnty=12; //aantal programmeerfases 
 
 //temps
 volatile unsigned long time;
@@ -102,8 +112,13 @@ void setup() {
 	//display.display();
 	//***display end
 
+	MEM_read();
 }
-
+void MEM_read() {
+	loc_adres[0] = EEPROM.read(100);
+	if (loc_adres[0] == 0xFF)loc_adres[0] = 0x03;
+	EEPROM.update(100, loc_adres[0]);
+}
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
 	//if (bitRead(GPIOR0, 0) == false) { //full bit
@@ -152,13 +167,11 @@ ISR(TIMER2_COMPA_vect) {
 		}
 	}
 }
-
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
 	//and programs EEPROM 
 
 }
-
 void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
@@ -173,7 +186,6 @@ void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
 	dcc_aantalBytes = 4;
 	count_repeat = 4;
 }
-
 void DCC_command() { //nieuwe
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
@@ -195,9 +207,6 @@ void DCC_command() { //nieuwe
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
 }
-
-
-
 void SW_exe() {
 	byte poort; byte changed;
 	GPIOR0 ^= (1 << 4);
@@ -205,7 +214,7 @@ void SW_exe() {
 	if (GPIOR0 & (1 << 4)) {
 		poort = PIND;
 		changed = poort ^ sw_statusD;
-		for (byte i=7; i > 6; i--) {
+		for (byte i = 7; i > 6; i--) {
 			if (changed & (1 << i) & ~poort & (1 << i)) {
 				SW_on(7 - i + 4);
 			}
@@ -215,7 +224,7 @@ void SW_exe() {
 	else {
 		poort = PINC;
 		changed = poort ^ sw_statusC;
-		for (byte i=0; i < 4; i++) {
+		for (byte i = 0; i < 4; i++) {
 			if (changed & (1 << i) & ~poort & (1 << i)) {
 				SW_on(i);
 			}
@@ -223,44 +232,109 @@ void SW_exe() {
 		sw_statusC = poort;
 	}
 }
+void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 
-void SW_double() { //called from SW_exe when sw0 and sw3 is pressed
+	GPIOR0 ^= (1 << 5);
+	//instellen display prg fase
+	if (GPIOR0 & (1 << 5)) { //programmode
+		DSP_prg();
+	}
+	else { //bedrijf
+		DSP_start();
+	}
+}
+void SW_on(byte sw) {
+	switch (sw) {
+	case 2:
+		if (~sw_statusC & (1 << 3)) SW_double();
+		break;
+	case 3:
+		if (~sw_statusC & (1 << 2)) SW_double();
+		break;
 
+
+	case 4:
+		PINB |= (1 << 0); //no DCC
+		break;
+	case 5:
+		break;
+	case 6:
+		break;
+	case 7:
+		break;
+	}
+	if (sw < 4) {
+		if (GPIOR0 & (1 << 5)) { //programmode
+			SW_PRG(sw);
+		}
+		else {
+			SW_pendel(sw);
+		}
+	}
 }
 
-void SW_on(byte sw) { //nieuw
+void SW_PRG(byte sw) {
+	if (GPIOR0 & (1 << 6)) { //value instellen mode
+		switch (sw) {
+		case 0:
+			break;
+		case 1:
+			break;
+		case 2:
+			break;
+		case 3:
+			break;
+		case 4:
+			break;
+		}
+	}
+	else { //parameter kiezen
+		switch (sw) {
+		case 0:
+			PRG_fase--;
+			if (PRG_fase > PRG_qnty)PRG_fase = PRG_qnty;
+			break;
+		case 1:
+			PRG_fase ++;
+			if (PRG_fase > PRG_qnty)PRG_fase = 0;
+			break;
+		case 2:
+			break;
+		case 3:
+			break;
+		case 4:
+			break;
+		}
+	}
+	DSP_prg();
+}
+void SW_pendel(byte sw) { //nieuw
 	Serial.println(sw);
 	switch (sw) {
 	case 0:
-			loc_speed = B01101110; //drive	
+		loc_speed = B01101110; //drive	
 		break;
 	case 1:
 		loc_speed = B01100000; //stop
 		break;
 	case 2:
-loc_function ^= (1 << 4); //headlights
+		loc_function ^= (1 << 4); //headlights
 		break;
 	case 3:
-		loc_function ^= (1 << 1); //cabin
 		//PRG_cv(10,1,6);
 		//
 		//display.clearDisplay();
 		//DSP_buttons(0);
-		break;
-
-	case 4:
-		PINB |= (1 << 0); //no DCC
+		loc_function ^= (1 << 1); //cabin
 		break;
 	}
 }
-
 void DSP_start() {
 	display.clearDisplay();
-
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
 	display.setCursor(10, 0);
-	display.print("www.wisselmotor.nl");
+	display.print(F("www.wisselmotor.nl"));
 	display.drawLine(1, 10, 127, 10, WHITE);
 	display.setTextSize(2);
 	display.setCursor(3, 24);
@@ -268,39 +342,54 @@ void DSP_start() {
 	display.display();
 	DSP_buttons(0);
 }
+void DSP_prg() {
+	switch (PRG_fase) {
+	case 0: //dcc loc 1 adres
+		TXT_1(1);
+		break;
+	case 1: //dcc loc 2 adres
+		TXT_1(2);
+		break;
+	case 2:
+		break;
+	case 3:
+		break;
+	case 4:
+		break;
+	}
 
+}
+//TXT voids zijn verkleiningen van txt bestanden, vermijden dubbele teksten in geheugen
+void TXT_1(byte loc) {
+	display.clearDisplay();
+	regel1;  display.print(txt_dcc);
+	regel2; display.print(txt_lok); display.println(loc);
+	DSP_buttons(10);
+}
 void DSP_buttons(byte mode) {
 	//sets mode in display
-	display.drawRect(0, 53, 128, 11, WHITE);
+	display.drawRect(0, 50, 128, 14, WHITE);
+	display.setTextSize(1);
+	display.setTextColor(WHITE);
+	display.setCursor(3, 54);
 	switch (mode) {
-	case 0: //
-		display.setTextSize(1);
-		display.setTextColor(WHITE);
-		display.setCursor(3, 55);
-		display.println("Start  <>   FL   F1");
+	case 0:
+		display.println("Start  loco   FL  F1");
 		break;
+	case 10:
+		display.println(" -     +     V     X");
+		break;
+
 	default:
-		display.setTextSize(2);
-		display.setTextColor(WHITE);
-		display.setCursor(10, 20);
-		display.print("mode: ");
-		display.println(mode);
 		break;
 	}
 	display.display();
 }
-
-void DSP_txt() {
-	//******display start
-	display.clearDisplay();
-	display.setTextSize(1);
+void DSP_settxt(byte X, byte Y, byte size) {
+	display.setTextSize(size);
 	display.setTextColor(WHITE);
-	display.setCursor(10, 10);
-	display.print("headlights: ");
-	display.println(random(0, 127));
-	display.display();
+	display.setCursor(X, Y);
 }
-
 void loop() {
 
 	//slow events timer
