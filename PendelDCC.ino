@@ -18,11 +18,15 @@
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 //teksten
-#define regel1 DSP_settxt(0, 1, 2)
-#define regel2 DSP_settxt(0, 21, 2)
+#define cd display.clearDisplay()
+#define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
+#define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
+#define regel3 DSP_settxt(10,23,2) //value tweede regel groot
+#define regel1s DSP_settxt(0, 2, 1) //value eerste regel klein
+#define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
 
-#define txt_dcc "DCC adres " 
-#define txt_lok "loco " 
+//#define txt_dcc "DCC adres " 
+//#define txt_lok "loco " 
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
@@ -51,7 +55,7 @@ byte loc_speed;
 byte loc_function = B10000000; //moet van EEPROM komen
 
 byte PRG_fase;
-byte PRG_qnty=12; //aantal programmeerfases 
+byte PRG_qnty = 12; //aantal programmeerfases 
 
 //temps
 volatile unsigned long time;
@@ -59,7 +63,6 @@ volatile unsigned long countpuls;
 unsigned long time_slow;
 byte functies;
 byte newlocadres = 10;
-
 
 void setup() {
 	Serial.begin(9600);
@@ -113,11 +116,7 @@ void setup() {
 	//***display end
 
 	MEM_read();
-}
-void MEM_read() {
-	loc_adres[0] = EEPROM.read(100);
-	if (loc_adres[0] == 0xFF)loc_adres[0] = 0x03;
-	EEPROM.update(100, loc_adres[0]);
+	GPIOR0 = B10000000; //set start conditions
 }
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
@@ -167,6 +166,48 @@ ISR(TIMER2_COMPA_vect) {
 		}
 	}
 }
+void MEM_read() {
+	loc_adres[0] = EEPROM.read(100);
+	loc_adres[1] = EEPROM.read(101);
+	if (loc_adres[0] == 0xFF) {
+		loc_adres[0] = 0x03;
+		EEPROM.update(100, loc_adres[0]);
+	}
+	if (loc_adres[1] == 0xFF) {
+		loc_adres[1] = 0x04;
+		EEPROM.update(101, loc_adres[1]);
+	}
+}
+void MEM_update() { //sets new value
+	switch (PRG_fase) {
+	case 0: //loc1 adres
+		EEPROM.update(100, loc_adres[0]);
+		break;
+	case 1: //loc2 adres
+		EEPROM.update(101, loc_adres[1]);
+		break;
+	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
+		DCC_write();
+		break;
+	}
+}
+void MEM_cancel() { //cancels, recalls value
+	switch (PRG_fase) {
+	case 0: //loc1 adres
+		loc_adres[0] = EEPROM.read(100);
+		break;
+	case 1: //loc2 adres
+		loc_adres[1] = EEPROM.read(101);
+		break;
+	}
+
+}
+void DCC_write() {
+	//writes loc adress in locomotive
+	Serial.println("ädres inschrijven");
+
+}
+
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
 	//and programs EEPROM 
@@ -186,21 +227,52 @@ void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
 	dcc_aantalBytes = 4;
 	count_repeat = 4;
 }
+void PRG_dec() {
+	switch (PRG_fase) {
+	case 0: ////dcc loc 1 adres
+		loc_adres[0]--;
+		if (loc_adres[0] < 1)loc_adres[0] = 127;
+		break;
+	case 1: ////dcc loc 2 adres
+		loc_adres[1]--;
+		if (loc_adres[1] < 1)loc_adres[1] = 127;
+		break;
+	case 2: //write DCC
+		GPIOR0 ^= (1 << 7);
+		break;
+	}
+	DSP_prg();
+}
+void PRG_inc() {
+	switch (PRG_fase) {
+	case 0: ////dcc loc 1 adres
+		loc_adres[0]++;
+		if (loc_adres[0] > 127)loc_adres[0] = 1;
+		break;
+	case 1: ////dcc loc 2 adres
+		loc_adres[1]++;
+		if (loc_adres[1] > 127)loc_adres[1] = 1;
+		break;
+	case 2: //write DCC
+		GPIOR0 ^= (1 << 7);
+		break;
+	}
+	DSP_prg();
+}
 void DCC_command() { //nieuwe
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
 		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV transmit
-		//Serial.println(count_repeat);
 	}
 	else { //send loc data
 		GPIOR0 ^= (1 << 0);
 		if (GPIOR0 & (1 << 0)) { //drive
-			dcc_data[0] = loc_adres;
+			dcc_data[0] = loc_adres[0];
 			dcc_data[1] = loc_speed;
 			dcc_aantalBytes = 2;
 		}
 		else { //function
-			dcc_data[0] = loc_adres;
+			dcc_data[0] = loc_adres[0];
 			dcc_data[1] = loc_function;
 			dcc_aantalBytes = 2;
 		}
@@ -233,7 +305,6 @@ void SW_exe() {
 	}
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
-
 	GPIOR0 ^= (1 << 5);
 	//instellen display prg fase
 	if (GPIOR0 & (1 << 5)) { //programmode
@@ -246,13 +317,17 @@ void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 void SW_on(byte sw) {
 	switch (sw) {
 	case 2:
-		if (~sw_statusC & (1 << 3)) SW_double();
+		if (~sw_statusC & (1 << 3)) {
+			SW_double();
+			return;
+		}
 		break;
 	case 3:
-		if (~sw_statusC & (1 << 2)) SW_double();
+		if (~sw_statusC & (1 << 2)) {
+			SW_double();
+			return;
+		}
 		break;
-
-
 	case 4:
 		PINB |= (1 << 0); //no DCC
 		break;
@@ -263,6 +338,7 @@ void SW_on(byte sw) {
 	case 7:
 		break;
 	}
+
 	if (sw < 4) {
 		if (GPIOR0 & (1 << 5)) { //programmode
 			SW_PRG(sw);
@@ -272,19 +348,22 @@ void SW_on(byte sw) {
 		}
 	}
 }
-
 void SW_PRG(byte sw) {
 	if (GPIOR0 & (1 << 6)) { //value instellen mode
 		switch (sw) {
 		case 0:
+			PRG_dec();
 			break;
 		case 1:
+			PRG_inc();
 			break;
 		case 2:
+			GPIOR0 &= ~(1 << 6);
+			MEM_update();
 			break;
 		case 3:
-			break;
-		case 4:
+			GPIOR0 &= ~(1 << 6);
+			MEM_cancel();
 			break;
 		}
 	}
@@ -295,21 +374,23 @@ void SW_PRG(byte sw) {
 			if (PRG_fase > PRG_qnty)PRG_fase = PRG_qnty;
 			break;
 		case 1:
-			PRG_fase ++;
+			PRG_fase++;
 			if (PRG_fase > PRG_qnty)PRG_fase = 0;
 			break;
 		case 2:
+			GPIOR0 |= (1 << 6);
 			break;
 		case 3:
-			break;
-		case 4:
+			GPIOR0 &= ~(1 << 5); //Pendel mode
+			DSP_start();
+			return;
 			break;
 		}
 	}
-	DSP_prg();
+DSP_prg();
 }
 void SW_pendel(byte sw) { //nieuw
-	Serial.println(sw);
+	//Serial.println(sw);
 	switch (sw) {
 	case 0:
 		loc_speed = B01101110; //drive	
@@ -339,32 +420,60 @@ void DSP_start() {
 	display.setTextSize(2);
 	display.setCursor(3, 24);
 	display.print("PenDel DCC");
-	display.display();
 	DSP_buttons(0);
+	display.display();
 }
 void DSP_prg() {
-	switch (PRG_fase) {
-	case 0: //dcc loc 1 adres
-		TXT_1(1);
-		break;
-	case 1: //dcc loc 2 adres
-		TXT_1(2);
-		break;
-	case 2:
-		break;
-	case 3:
-		break;
-	case 4:
-		break;
-	}
+	if (GPIOR0 & (1 << 6)) { //value 
+		switch (PRG_fase) {
+		case 0: //dcc loc 1 adres
+			TXT_pv(true, 1);
+			regel3; display.print(loc_adres[0]);
+			break;
+		case 1: //dcc loc 2 adres
+			TXT_pv(true, 2);
+			regel3; display.print(loc_adres[1]);
+			break;
+		case 2: //Write adres in loc and accessoires
+			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
+			if (GPIOR0 & (1 << 7)) {
+				TXT(101);
+			}
+			else {
+				TXT(102);
+			}
+			DSP_buttons(10);
+			break;
 
-}
-//TXT voids zijn verkleiningen van txt bestanden, vermijden dubbele teksten in geheugen
-void TXT_1(byte loc) {
-	display.clearDisplay();
-	regel1;  display.print(txt_dcc);
-	regel2; display.print(txt_lok); display.println(loc);
-	DSP_buttons(10);
+		case 4:
+			break;
+
+			//enz...
+		}
+	}
+	else { //parameter
+		switch (PRG_fase) {
+		case 0: //dcc loc 1 adres
+			TXT_pv(false, 1);
+			break;
+		case 1: //dcc loc 2 adres
+			TXT_pv(false, 2);
+			break;
+		case 2:
+			cd;
+			regel1; TXT(10); TXT(0);
+			regel2; TXT(1); //Write DCC adres
+			DSP_buttons(10);
+			break;
+
+		case 3:
+
+			break;
+		case 4:
+			break;
+		}
+	}
+	display.display();
 }
 void DSP_buttons(byte mode) {
 	//sets mode in display
@@ -374,25 +483,68 @@ void DSP_buttons(byte mode) {
 	display.setCursor(3, 54);
 	switch (mode) {
 	case 0:
-		display.println("Start  loco   FL  F1");
+		TXT(20);
 		break;
 	case 10:
-		display.println(" -     +     V     X");
+		TXT(21);
 		break;
 
 	default:
 		break;
 	}
-	display.display();
 }
 void DSP_settxt(byte X, byte Y, byte size) {
 	display.setTextSize(size);
 	display.setTextColor(WHITE);
-	display.setCursor(X, Y);
+	if (X + Y > 0) display.setCursor(X, Y);
 }
-void loop() {
-
-	//slow events timer
+void TXT(byte t) {
+	switch (t) {
+	case 0:
+		display.println("");
+		break;
+	case 1:
+		display.print("DCC adres ");
+		break;
+	case 2:
+		display.print("Loco ");
+		break;
+	case 10:
+		display.print("Write ");
+		break;
+	case 20:
+		display.print("Start  loco   FL  F1");
+		break;
+	case 21:
+		display.print(" -     +     V     X");
+		break;
+	case 30:
+		break;
+	case 100:
+		display.print("0 ");
+		break;
+	case 101:
+		display.print("1 ");
+		break;
+	case 102:
+		display.print("2 ");
+		break;
+	}
+}
+void TXT_pv(boolean small, byte val) {
+	display.clearDisplay();
+	if (small == true) {
+		regel1s; TXT(1);
+		regel2s; TXT(2); display.println(val);
+	}
+	else {
+		regel1; TXT(1);
+		display.println("");
+		regel2; TXT(2); display.println(val);
+	}
+	DSP_buttons(10);
+}
+void loop() {	//slow events timer
 	count_slow++;
 	if (count_slow > 10000) { //10000 makes frequency of command sending important 5000 is too fast
 		count_slow = 0;
