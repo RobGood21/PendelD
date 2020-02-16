@@ -212,9 +212,18 @@ void MEM_update() { //sets new values/ sends CV
 		break;
 	case 3: //program CV
 		//PRG_value 0=loco1; 1=loco2; 2=accessoire
-		//CV[0]=CV; CV[1]=Value
+		//CVs[0]=CV; CVs[1]=Value
+		switch (PRG_value) {
+		case 0:
+			PRG_cv(loc_adres[0], PRG_cvs[0], PRG_cvs[1]);
+			break;
+		case 1:
+			PRG_cv(loc_adres[1], PRG_cvs[0], PRG_cvs[1]);
+			break;
+		case 2: //voor accesoire nog maken. andere structuur
 
-
+			break;
+		}
 		break;
 	}
 }
@@ -271,9 +280,7 @@ void PRG_cv(byte adres, byte cv, byte value) { //CV programming
 	count_repeat = 4;
 }
 void PRG_dec() {
-
-Serial.println(PRG_level);
-
+	//Serial.println(PRG_level);
 	switch (PRG_fase) {
 	case 0: ////dcc loc 1 adres
 		loc_adres[0]--;
@@ -288,19 +295,19 @@ Serial.println(PRG_level);
 		if (PRG_value > 1) PRG_value = 1; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
-
 	case 3: //write CV
-
 		switch (PRG_level) {
-			
-		case 2:
+		case 2: //parameter
 			PRG_value--;
 			if (PRG_value > 2) PRG_value = 2; //instellen dcc accessoire 2 loc1 en loc2		
 			break;
-		case 3:
-			
+		case 3: //CV
 			PRG_cvs[0]--;
-			if (PRG_cvs[0] > 127) PRG_cvs[0] = 127;
+			if (PRG_cvs[0] < 1) PRG_cvs[0] = 255;
+			break;
+		case 4://Value
+			PRG_cvs[1]--;
+			if (PRG_cvs[1] < 1) PRG_cvs[1] = 255;
 			break;
 		}
 		break;
@@ -319,12 +326,24 @@ void PRG_inc() {
 		break;
 	case 2: //write DCC
 		PRG_value++;
-		if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		if (PRG_value > 1) PRG_value = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
 	case 3: //write CV
-		PRG_value++;
-		if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoire 2 loc1 en loc2		
+		switch (PRG_level) {
+		case 2:
+			PRG_value++;
+			if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoire 2 loc1 en loc2		
+			break;
+		case 3:
+			PRG_cvs[0]++;
+			if (PRG_cvs[0] == 0) PRG_cvs[0] = 1;
+			break;
+		case 4://Value
+			PRG_cvs[1]++;
+			if (PRG_cvs[1] == 0) PRG_cvs[1] = 1;
+			break;
+		}
 		break;
 	}
 	//DSP_prg();
@@ -489,10 +508,8 @@ void SW_PRG(byte sw) {
 		break;
 
 	case 3: //level 3 bv.CV kiezen
-
 		//Serial.print("switch ");
 		//Serial.println(sw);
-
 		switch (sw) {
 		case 0:
 			PRG_dec();
@@ -501,6 +518,25 @@ void SW_PRG(byte sw) {
 			PRG_inc();
 			break;
 		case 2:
+			PRG_level++;
+			break;
+		case 3:
+			PRG_level--;
+			MEM_cancel;
+			break;
+		}
+		break;
+	case 4:
+		switch (sw) {
+		case 0:
+			PRG_dec();
+			break;
+		case 1:
+			PRG_inc();
+			break;
+		case 2:
+			MEM_update();
+			PRG_level--;
 			break;
 		case 3:
 			PRG_level--;
@@ -509,8 +545,8 @@ void SW_PRG(byte sw) {
 		}
 		break;
 	}
-	//if (~GPIOR1 & (1 << 1)) 
-	DSP_prg(); //dit bit zorgt dat pas na de bewerking, bv. adres schrijven
+	if (~GPIOR1 & (1 << 1)) DSP_prg(); 
+	//dit bit zorgt dat pas na de bewerking, bv. adres schrijven
 //het display vernieuwd ibv. progressbar bv.
 }
 void SW_pendel(byte sw) { //nieuw
@@ -547,10 +583,8 @@ void DSP_start() {
 	DSP_buttons(0);
 	display.display();
 }
-
-
 void DSP_prg() {
-	Serial.println("DSP_prg");
+	//Serial.println("DSP_prg");
 
 	switch (PRG_level) {
 
@@ -620,34 +654,43 @@ void DSP_prg() {
 		break;
 	case 3: // level 3
 
+		switch (PRG_fase) {
+		case 3: //CV programming level 3 CV keuze
+			TXT_cv3();
+			// display.print(PRG_cvs[0]);
+			break;
+		}
+		break;
+	case 4: //level 4
+
 		//Serial.print("PRG_level:");
 		//Serial.println(PRG_level);
 
 		switch (PRG_fase) {
-		case 3: //CV programming level 3 CV keuze
-			cd; regel1s; TXT(10); TXT(5);
-			switch (PRG_value) {
-			case 0:
-				TXT(2); TXT(101);
-				break;
-			case 1:
-				TXT(2); TXT(102);
-				break;
-			case 2:
-				TXT(3);
-				break;
-			}
-			regel2; TXT(5); display.print(PRG_cvs[0]);
+		case 3:
+			TXT_cv3(); TXT(110); TXT(6);
+			display.print(PRG_cvs[1]);
 			break;
 		}
-		break;
-	}
-
-
+		break;	}
 	DSP_buttons(10);
 	display.display();
 }
-
+void TXT_cv3() {
+	cd; regel1s; TXT(10); TXT(5);
+	switch (PRG_value) {
+	case 0:
+		TXT(2); TXT(101);
+		break;
+	case 1:
+		TXT(2); TXT(102);
+		break;
+	case 2:
+		TXT(3);
+		break;
+	}
+	regel2; TXT(5); display.print(PRG_cvs[0]);
+}
 void DSP_buttons(byte mode) {
 	//sets mode in display
 	display.drawRect(0, 50, 128, 14, WHITE);
@@ -686,10 +729,13 @@ void TXT(byte t) {
 		display.print("Accessoire ");
 		break;
 	case 4:
-		display.print("**** "); //niet in gebruikt
+		display.print("**** "); //niet in gebruik
 		break;
 	case 5:
 		display.print("CV ");
+		break;
+	case 6:
+		display.print("W ");
 		break;
 
 
@@ -712,6 +758,9 @@ void TXT(byte t) {
 		break;
 	case 102:
 		display.print("2 ");
+		break;
+	case 110:
+		display.print(" ");
 		break;
 	}
 }
