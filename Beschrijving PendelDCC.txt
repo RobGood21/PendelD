@@ -1,4 +1,7 @@
 PendelD pendel automaat voor digitale locomotieven met DCC decoder
+Paar begrippen:
+PRG_fase  wat wordt er geprogrammeerd
+PRG_level, hoe diep CV heeft bv 4 levels, adres loco1 maar 2
 
 PB3; PIN 11  is compare match register timer 2 gebruiken voor DCC output PIN
 
@@ -18,3 +21,7 @@ bit4	Switch reading port C or port D
 bit5	Programmode true, false pendel bedrijf
 bit6	Program parameter false/ value true
 bit7	Active loco false=2; true=1
+
+COM reg 2 GPIOR1
+bit 0 Write adres to loc true, false normal operation
+bit1 blocks DSP updates

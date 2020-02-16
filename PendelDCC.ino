@@ -17,6 +17,9 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+//constanten
+#define prgmax 3 //aantal programma fases(+1), verhogen bij toevoegen prgfase
+
 //teksten
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
@@ -41,6 +44,7 @@ byte count_bit;
 byte count_cv;
 byte count_repeat;
 int count_slow;
+byte count_wa; //write adres
 
 byte dcc_fase;
 byte dcc_data[5]; //bevat te verzenden DCC bytes, current DCC commando
@@ -50,12 +54,15 @@ byte sw_statusD; //D port
 
 byte dcc_cv[3];
 
-byte loc_adres[2]; //moet van EEPROM komen
-byte loc_speed;
-byte loc_function = B10000000; //moet van EEPROM komen
+
+byte loc_adres[3]; //moet van EEPROM komen, 3e adres is voor programmeerttoepassing
+byte loc_speed[2];
+byte loc_function[2]; //moet van EEPROM komen
 
 byte PRG_fase;
-byte PRG_qnty = 12; //aantal programmeerfases 
+byte PRG_level; //hoe diep in het programmeer proces
+byte PRG_value; //ingestelde waarde op PRG_level 2
+byte PRG_cvs[2]; //0=CV 1=waarde
 
 //temps
 volatile unsigned long time;
@@ -117,6 +124,8 @@ void setup() {
 
 	MEM_read();
 	GPIOR0 = B10000000; //set start conditions
+	loc_function[0] = 128;
+	loc_function[1] = 128;
 }
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
@@ -178,7 +187,8 @@ void MEM_read() {
 		EEPROM.update(101, loc_adres[1]);
 	}
 }
-void MEM_update() { //sets new value
+void MEM_update() { //sets new values/ sends CV 
+
 	switch (PRG_fase) {
 	case 0: //loc1 adres
 		EEPROM.update(100, loc_adres[0]);
@@ -187,7 +197,24 @@ void MEM_update() { //sets new value
 		EEPROM.update(101, loc_adres[1]);
 		break;
 	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
-		DCC_write();
+		switch (PRG_value) {
+		case 0: //loco 1
+			loc_adres[2] = loc_adres[0];
+			break;
+		case 1: //loco 2
+			loc_adres[2] = loc_adres[1];
+			break;
+		}
+
+		GPIOR1 |= (1 << 1); //blocks display updates 
+		count_wa = 0;
+		GPIOR1 |= (1 << 0); //enable dcc adress write to loc//DCC_write();			
+		break;
+	case 3: //program CV
+		//PRG_value 0=loco1; 1=loco2; 2=accessoire
+		//CV[0]=CV; CV[1]=Value
+
+
 		break;
 	}
 }
@@ -204,21 +231,37 @@ void MEM_cancel() { //cancels, recalls value
 }
 void DCC_write() {
 	//writes loc adress in locomotive
-	Serial.println("ädres inschrijven");
-
+	if (~GPIOR0 & (1 << 2)) {
+		count_wa++;
+		if (count_wa & (1 << 7)) {
+			DCC_endwrite();
+		}
+		else {
+			PRG_cv(count_wa, 1, loc_adres[2]); //merk op loc adres 3 =s het adres van dan actief loc
+			display.drawPixel(count_wa, 40, WHITE);
+			display.drawPixel(count_wa, 41, WHITE);
+			display.display();
+		}
+	}
 }
+void DCC_endwrite() {
+	GPIOR1 &= ~(1 << 0);
+	Serial.println("adres aangepast");
+	GPIOR1 &= ~(1 << 1);
 
+	DSP_prg();
+}
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
 	//and programs EEPROM 
 
 }
-void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
+void PRG_cv(byte adres, byte cv, byte value) { //CV programming
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
-	dcc_data[0] = oldadres; // B00000000; //
+	dcc_data[0] = adres; // B00000000; //
 	//dcc_data[0] = 0x00; //broadcast adres??
 	dcc_data[1] = B11101100; //instruction write CV
 	dcc_data[2] = cv;
@@ -228,6 +271,9 @@ void PRG_cv(byte oldadres, byte cv, byte value) { //CV programming
 	count_repeat = 4;
 }
 void PRG_dec() {
+
+Serial.println(PRG_level);
+
 	switch (PRG_fase) {
 	case 0: ////dcc loc 1 adres
 		loc_adres[0]--;
@@ -238,10 +284,28 @@ void PRG_dec() {
 		if (loc_adres[1] < 1)loc_adres[1] = 127;
 		break;
 	case 2: //write DCC
-		GPIOR0 ^= (1 << 7);
+		PRG_value--;
+		if (PRG_value > 1) PRG_value = 1; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		//GPIOR0 ^= (1 << 7);
+		break;
+
+	case 3: //write CV
+
+		switch (PRG_level) {
+			
+		case 2:
+			PRG_value--;
+			if (PRG_value > 2) PRG_value = 2; //instellen dcc accessoire 2 loc1 en loc2		
+			break;
+		case 3:
+			
+			PRG_cvs[0]--;
+			if (PRG_cvs[0] > 127) PRG_cvs[0] = 127;
+			break;
+		}
 		break;
 	}
-	DSP_prg();
+	//DSP_prg();
 }
 void PRG_inc() {
 	switch (PRG_fase) {
@@ -254,10 +318,16 @@ void PRG_inc() {
 		if (loc_adres[1] > 127)loc_adres[1] = 1;
 		break;
 	case 2: //write DCC
-		GPIOR0 ^= (1 << 7);
+		PRG_value++;
+		if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		//GPIOR0 ^= (1 << 7);
+		break;
+	case 3: //write CV
+		PRG_value++;
+		if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoire 2 loc1 en loc2		
 		break;
 	}
-	DSP_prg();
+	//DSP_prg();
 }
 void DCC_command() { //nieuwe
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
@@ -268,12 +338,12 @@ void DCC_command() { //nieuwe
 		GPIOR0 ^= (1 << 0);
 		if (GPIOR0 & (1 << 0)) { //drive
 			dcc_data[0] = loc_adres[0];
-			dcc_data[1] = loc_speed;
+			dcc_data[1] = loc_speed[0];
 			dcc_aantalBytes = 2;
 		}
 		else { //function
 			dcc_data[0] = loc_adres[0];
-			dcc_data[1] = loc_function;
+			dcc_data[1] = loc_function[0];
 			dcc_aantalBytes = 2;
 		}
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
@@ -305,12 +375,19 @@ void SW_exe() {
 	}
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
-	GPIOR0 ^= (1 << 5);
-	//instellen display prg fase
-	if (GPIOR0 & (1 << 5)) { //programmode
+	if (PRG_level == 0) {
+		GPIOR0 |= (1 << 5); //program mode
+		PRG_level = 1;
 		DSP_prg();
+		//all stop
+		loc_speed[0] = B01100001; //stop
+		loc_speed[1] = B01100001; //stop
+		loc_function[0] = 128;
+		loc_function[0] = 128;
 	}
-	else { //bedrijf
+	else {
+		GPIOR0 &= ~(1 << 5); //pendel mode
+		PRG_level = 0;
 		DSP_start();
 	}
 }
@@ -340,7 +417,7 @@ void SW_on(byte sw) {
 	}
 
 	if (sw < 4) {
-		if (GPIOR0 & (1 << 5)) { //programmode
+		if (GPIOR0 & (1 << 5)) { //programmode, kan misschien met checken prg_level?
 			SW_PRG(sw);
 		}
 		else {
@@ -349,7 +426,31 @@ void SW_on(byte sw) {
 	}
 }
 void SW_PRG(byte sw) {
-	if (GPIOR0 & (1 << 6)) { //value instellen mode
+	boolean end = false;
+	switch (PRG_level) {
+	case 1:	//parameters	
+		switch (sw) {
+		case 0:
+			PRG_fase--;
+			if (PRG_fase > prgmax)PRG_fase = prgmax;
+			break;
+		case 1:
+			PRG_fase++;
+			if (PRG_fase > prgmax)PRG_fase = 0;
+			break;
+		case 2:
+			PRG_level++;
+			break;
+		case 3:
+			GPIOR0 &= ~(1 << 5); //Pendel mode
+			PRG_level = 0;
+			DSP_start();
+			return;
+			break;
+		}
+		break;
+
+	case 2: //values
 		switch (sw) {
 		case 0:
 			PRG_dec();
@@ -358,55 +459,78 @@ void SW_PRG(byte sw) {
 			PRG_inc();
 			break;
 		case 2:
-			GPIOR0 &= ~(1 << 6);
-			MEM_update();
+			switch (PRG_fase) {
+			case 0: //dcc adres 1
+				end = true;
+				break;
+			case 1: //dcc adres 2
+				end = true;
+				break;
+			case 2: //schrijf dcc adres
+				end = true;
+				break;
+			case 3://schrijf CV
+				   //Serial.println("nu");
+				PRG_level++;
+				break;
+			}
+
+			if (end == true) {
+				MEM_update();
+				PRG_level--;
+			}
 			break;
 		case 3:
-			GPIOR0 &= ~(1 << 6);
+			PRG_level--;
+			//GPIOR0 &= ~(1 << 6);
 			MEM_cancel();
 			break;
 		}
-	}
-	else { //parameter kiezen
+		break;
+
+	case 3: //level 3 bv.CV kiezen
+
+		//Serial.print("switch ");
+		//Serial.println(sw);
+
 		switch (sw) {
 		case 0:
-			PRG_fase--;
-			if (PRG_fase > PRG_qnty)PRG_fase = PRG_qnty;
+			PRG_dec();
 			break;
 		case 1:
-			PRG_fase++;
-			if (PRG_fase > PRG_qnty)PRG_fase = 0;
+			PRG_inc();
 			break;
 		case 2:
-			GPIOR0 |= (1 << 6);
 			break;
 		case 3:
-			GPIOR0 &= ~(1 << 5); //Pendel mode
-			DSP_start();
-			return;
+			PRG_level--;
+			MEM_cancel;
 			break;
 		}
+		break;
 	}
-DSP_prg();
+	//if (~GPIOR1 & (1 << 1)) 
+	DSP_prg(); //dit bit zorgt dat pas na de bewerking, bv. adres schrijven
+//het display vernieuwd ibv. progressbar bv.
 }
 void SW_pendel(byte sw) { //nieuw
 	//Serial.println(sw);
 	switch (sw) {
 	case 0:
-		loc_speed = B01101110; //drive	
+		loc_speed[0] = B01101110; //drive	
 		break;
 	case 1:
-		loc_speed = B01100000; //stop
+		loc_speed[0] = B01100000; //stop
 		break;
 	case 2:
-		loc_function ^= (1 << 4); //headlights
+		loc_function[0] ^= (1 << 4); //headlights
 		break;
 	case 3:
 		//PRG_cv(10,1,6);
 		//
 		//display.clearDisplay();
 		//DSP_buttons(0);
-		loc_function ^= (1 << 1); //cabin
+		loc_function[0] ^= (1 << 1); //cabin
 		break;
 	}
 }
@@ -423,35 +547,15 @@ void DSP_start() {
 	DSP_buttons(0);
 	display.display();
 }
+
+
 void DSP_prg() {
-	if (GPIOR0 & (1 << 6)) { //value 
-		switch (PRG_fase) {
-		case 0: //dcc loc 1 adres
-			TXT_pv(true, 1);
-			regel3; display.print(loc_adres[0]);
-			break;
-		case 1: //dcc loc 2 adres
-			TXT_pv(true, 2);
-			regel3; display.print(loc_adres[1]);
-			break;
-		case 2: //Write adres in loc and accessoires
-			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
-			if (GPIOR0 & (1 << 7)) {
-				TXT(101);
-			}
-			else {
-				TXT(102);
-			}
-			DSP_buttons(10);
-			break;
+	Serial.println("DSP_prg");
 
-		case 4:
-			break;
+	switch (PRG_level) {
 
-			//enz...
-		}
-	}
-	else { //parameter
+	case 1: //parameter
+
 		switch (PRG_fase) {
 		case 0: //dcc loc 1 adres
 			TXT_pv(false, 1);
@@ -459,22 +563,91 @@ void DSP_prg() {
 		case 1: //dcc loc 2 adres
 			TXT_pv(false, 2);
 			break;
-		case 2:
+		case 2: //write loc adresses
 			cd;
 			regel1; TXT(10); TXT(0);
 			regel2; TXT(1); //Write DCC adres
 			DSP_buttons(10);
 			break;
-
-		case 3:
-
-			break;
-		case 4:
+		case 3: //Cv programming
+			cd;
+			regel1; TXT(10); TXT(0);
+			regel2; TXT(5);
+			DSP_buttons(10);
 			break;
 		}
+		break;
+
+	case 2: // value, level2
+
+		switch (PRG_fase) {
+		case 0: //dcc loc 1 adres
+			TXT_pv(true, 1);
+			regel3; display.print(loc_adres[0]);
+			break;
+
+		case 1: //dcc loc 2 adres
+			TXT_pv(true, 2);
+			regel3; display.print(loc_adres[1]);
+			break;
+		case 2: //Write adres in loc and accessoires
+			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
+			switch (PRG_value) {
+			case 0:
+				TXT(101);
+				break;
+			case 1:
+				TXT(102);
+				break;
+			}
+			break;
+		case 3: //CV programming
+			cd; regel1s; TXT(10); TXT(5); regel2;
+
+			switch (PRG_value) {
+			case 0: //loc1
+				TXT(2); TXT(101);
+				break;
+			case 1: //loc2
+				TXT(2); TXT(102);
+				break;
+			case 2://accessoire
+				TXT(3);
+				break;
+			}
+			break;
+		}
+		break;
+	case 3: // level 3
+
+		//Serial.print("PRG_level:");
+		//Serial.println(PRG_level);
+
+		switch (PRG_fase) {
+		case 3: //CV programming level 3 CV keuze
+			cd; regel1s; TXT(10); TXT(5);
+			switch (PRG_value) {
+			case 0:
+				TXT(2); TXT(101);
+				break;
+			case 1:
+				TXT(2); TXT(102);
+				break;
+			case 2:
+				TXT(3);
+				break;
+			}
+			regel2; TXT(5); display.print(PRG_cvs[0]);
+			break;
+		}
+		break;
 	}
+
+
+	DSP_buttons(10);
 	display.display();
 }
+
 void DSP_buttons(byte mode) {
 	//sets mode in display
 	display.drawRect(0, 50, 128, 14, WHITE);
@@ -509,8 +682,19 @@ void TXT(byte t) {
 	case 2:
 		display.print("Loco ");
 		break;
+	case 3:
+		display.print("Accessoire ");
+		break;
+	case 4:
+		display.print("**** "); //niet in gebruikt
+		break;
+	case 5:
+		display.print("CV ");
+		break;
+
+
 	case 10:
-		display.print("Write ");
+		display.print("Schrijf ");
 		break;
 	case 20:
 		display.print("Start  loco   FL  F1");
@@ -551,6 +735,7 @@ void loop() {	//slow events timer
 		//slow events
 		SW_exe(); //switches
 		//start DCC command transmit
+		if (GPIOR1 & (1 << 0))DCC_write(); //writing dcc adres in loc
 		DCC_command();
 		dcc_fase = 1;
 	}
