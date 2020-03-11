@@ -59,9 +59,14 @@ byte loc_adres[3]; //moet van EEPROM komen, 3e adres is voor programmeerttoepass
 byte loc_speed[2];
 byte loc_function[2]; //moet van EEPROM komen
 
+byte dcc_wissels; //dcc basis adres wissel decoder 
+byte dcc_seinen; //dcc basis adres sein decoder
+
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
+byte PRG_typeDCC;
 byte PRG_value; //ingestelde waarde op PRG_level 2
+
 byte PRG_cvs[2]; //0=CV 1=waarde
 
 //temps
@@ -186,16 +191,39 @@ void MEM_read() {
 		loc_adres[1] = 0x04;
 		EEPROM.update(101, loc_adres[1]);
 	}
+
+	dcc_wissels = EEPROM.read(102);
+	if (dcc_wissels == 0xFF) {
+		dcc_wissels = 1; //default =1
+		EEPROM.update(102, dcc_wissels);
+	}
+	dcc_seinen = EEPROM.read(103); //heeft 8 dcc kanalen(16 leds)
+	if (dcc_seinen == 0xFF) {
+		dcc_seinen = 254;
+		EEPROM.update(103, dcc_seinen);
+	}
+	//default=0xFF 255
+
 }
 void MEM_update() { //sets new values/ sends CV 
-
 	switch (PRG_fase) {
 	case 0: //loc1 adres
-		EEPROM.update(100, loc_adres[0]);
+		switch (PRG_typeDCC) {
+		case 0: //loc1
+			EEPROM.update(100, loc_adres[0]);
+			break;
+		case 1: //loc2
+			EEPROM.update(101, loc_adres[1]);
+			break;
+		case 2://wissels
+			EEPROM.update(102, dcc_wissels);
+			break;
+		case 3: //seinen
+			EEPROM.update(103, dcc_seinen);
+			break;
+		}
 		break;
-	case 1: //loc2 adres
-		EEPROM.update(101, loc_adres[1]);
-		break;
+		//****************************PROGRAM fase 2
 	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
 		switch (PRG_value) {
 		case 0: //loco 1
@@ -210,6 +238,7 @@ void MEM_update() { //sets new values/ sends CV
 		count_wa = 0;
 		GPIOR1 |= (1 << 0); //enable dcc adress write to loc//DCC_write();			
 		break;
+		//*****************************Programfase 3
 	case 3: //program CV
 		//PRG_value 0=loco1; 1=loco2; 2=accessoire
 		//CVs[0]=CV; CVs[1]=Value
@@ -282,14 +311,39 @@ void PRG_cv(byte adres, byte cv, byte value) { //CV programming
 void PRG_dec() {
 	//Serial.println(PRG_level);
 	switch (PRG_fase) {
-	case 0: ////dcc loc 1 adres
-		loc_adres[0]--;
-		if (loc_adres[0] < 1)loc_adres[0] = 127;
-		break;
+	case 0: //INstellen DCC adres
+		switch (PRG_level) {
+		case 2:  //dec voor welk loc, wissels of seinen
+			PRG_typeDCC--;
+			if (PRG_typeDCC > 3)PRG_typeDCC = 3;
+			break;
+		case 3://waarde DCC adres aanpassen
+			switch (PRG_typeDCC) {
+			case 0:
+				loc_adres[0]--;
+				if (loc_adres[0] == 0)loc_adres[0] = 127;
+				break;
+			case 1:
+				loc_adres[1]--;
+				if (loc_adres[1] == 0)loc_adres[1] = 127;
+				break;
+			case 2:
+				dcc_wissels--;
+				if (dcc_wissels == 0)dcc_wissels = 255;
+				break;
+			case 3:
+				dcc_seinen--;
+				if (dcc_seinen == 0)dcc_seinen = 254;
+				break;
+			}
+			break;
+		}
+
 	case 1: ////dcc loc 2 adres
-		loc_adres[1]--;
-		if (loc_adres[1] < 1)loc_adres[1] = 127;
+		//Wordt nu ff niet gebruikt...
 		break;
+
+
 	case 2: //write DCC
 		PRG_value--;
 		if (PRG_value > 1) PRG_value = 1; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
@@ -316,13 +370,37 @@ void PRG_dec() {
 }
 void PRG_inc() {
 	switch (PRG_fase) {
-	case 0: ////dcc loc 1 adres
-		loc_adres[0]++;
-		if (loc_adres[0] > 127)loc_adres[0] = 1;
+	case 0: //inc DCC van loc, wissels of seinen
+		switch (PRG_level) {
+		case 2:
+			PRG_typeDCC++;
+			if (PRG_typeDCC > 3)PRG_typeDCC = 0;
+			break;
+		case 3:
+			switch (PRG_typeDCC) {
+			case 0:
+				loc_adres[0]++;
+				if (loc_adres[0] == 0)loc_adres[0] = 1;
+				break;
+			case 1:
+				loc_adres[1]++;
+				if (loc_adres[1] == 0)loc_adres[1] = 1;
+				break;
+			case 2:
+				dcc_wissels++;
+				if (dcc_wissels == 0)dcc_wissels = 1;
+				break;
+			case 3:
+				dcc_seinen++;
+				if (dcc_seinen == 0)dcc_seinen = 1;
+				break;
+			}
+			break;
+			//break;
+		}
 		break;
 	case 1: ////dcc loc 2 adres
-		loc_adres[1]++;
-		if (loc_adres[1] > 127)loc_adres[1] = 1;
+//wordt efkens niet gebruikt
 		break;
 	case 2: //write DCC
 		PRG_value++;
@@ -447,7 +525,8 @@ void SW_on(byte sw) {
 void SW_PRG(byte sw) {
 	boolean end = false;
 	switch (PRG_level) {
-	case 1:	//parameters	
+		//++++++++LEVEL 1
+	case 1:	//Soort instelling	
 		switch (sw) {
 		case 0:
 			PRG_fase--;
@@ -469,7 +548,8 @@ void SW_PRG(byte sw) {
 		}
 		break;
 
-	case 2: //values
+		///++++++++LEVEL2
+	case 2: //Level 2
 		switch (sw) {
 		case 0:
 			PRG_dec();
@@ -479,17 +559,16 @@ void SW_PRG(byte sw) {
 			break;
 		case 2:
 			switch (PRG_fase) {
-			case 0: //dcc adres 1
-				end = true;
+			case 0: //DCC adressen instellen
+				PRG_level++;
 				break;
 			case 1: //dcc adres 2
-				end = true;
+				//FF niet in gebruik
 				break;
 			case 2: //schrijf dcc adres
 				end = true;
 				break;
-			case 3://schrijf CV
-				   //Serial.println("nu");
+			case 3:
 				PRG_level++;
 				break;
 			}
@@ -507,7 +586,10 @@ void SW_PRG(byte sw) {
 		}
 		break;
 
-	case 3: //level 3 bv.CV kiezen
+
+		//+++++++++++++++LEVEL3
+	case 3: //level 3
+
 		//Serial.print("switch ");
 		//Serial.println(sw);
 		switch (sw) {
@@ -517,12 +599,19 @@ void SW_PRG(byte sw) {
 		case 1:
 			PRG_inc();
 			break;
+
 		case 2:
-			PRG_level++;
+			switch (PRG_fase) {
+			case 0: //instellen DCC adressen
+				PRG_level--;
+				MEM_update();
+			}
+
+			//PRG_level++;
 			break;
 		case 3:
 			PRG_level--;
-			MEM_cancel;
+			MEM_cancel();
 			break;
 		}
 		break;
@@ -545,7 +634,7 @@ void SW_PRG(byte sw) {
 		}
 		break;
 	}
-	if (~GPIOR1 & (1 << 1)) DSP_prg(); 
+	if (~GPIOR1 & (1 << 1)) DSP_prg();
 	//dit bit zorgt dat pas na de bewerking, bv. adres schrijven
 //het display vernieuwd ibv. progressbar bv.
 }
@@ -584,18 +673,19 @@ void DSP_start() {
 	display.display();
 }
 void DSP_prg() {
-	//Serial.println("DSP_prg");
-
+	int adrs;
 	switch (PRG_level) {
-
-	case 1: //parameter
-
+		//**********************
+	case 1: //soort instelling
 		switch (PRG_fase) {
-		case 0: //dcc loc 1 adres
-			TXT_pv(false, 1);
+		case 0: //Instellen DCC adres
+			cd;
+			regel1; TXT(7); TXT(0); //Instellen
+			regel2; TXT(1); //DCC adres	
 			break;
 		case 1: //dcc loc 2 adres
-			TXT_pv(false, 2);
+			cd; regel1; TXT(255);
+
 			break;
 		case 2: //write loc adresses
 			cd;
@@ -611,17 +701,30 @@ void DSP_prg() {
 			break;
 		}
 		break;
-
-	case 2: // value, level2
-
+		//**********************************level 2
+	case 2: // program level 2
 		switch (PRG_fase) {
-		case 0: //dcc loc 1 adres
-			TXT_pv(true, 1);
-			regel3; display.print(loc_adres[0]);
+		case 0: //keuze loc of accessoire
+			cd;
+			regel1s; TXT(7); TXT(1); TXT(0); regel2;
+			switch (PRG_typeDCC) { //DCC van welke loc of accessoire keuze
+			case 0:
+				TXT(2); TXT(101);
+				break;
+			case 1:
+				TXT(2); TXT(102);
+				break;
+			case 2:
+				TXT(8);
+				break;
+			case 3:
+				TXT(9);
+				break;
+			}
 			break;
 
 		case 1: //dcc loc 2 adres
-			TXT_pv(true, 2);
+			//TXT_pv(true, 2);
 			regel3; display.print(loc_adres[1]);
 			break;
 		case 2: //Write adres in loc and accessoires
@@ -652,9 +755,40 @@ void DSP_prg() {
 			break;
 		}
 		break;
+
+		//**********************************level 3
 	case 3: // level 3
 
 		switch (PRG_fase) {
+		case 0: //Instellen DCC adressen
+			cd; regel1s; TXT(1);
+			switch (PRG_typeDCC) {
+			case 0: //loc1
+				TXT(2); TXT(101);
+				regel2; display.print(loc_adres[0]);
+				break;
+			case 1: //loc2
+				TXT(2); TXT(102);
+				regel2; display.print(loc_adres[1]);
+				break;
+			case 2://wissels
+				TXT(8); regel2; display.print(dcc_wissels);
+				display.setTextSize(1);
+				display.setCursor(display.getCursorX(), display.getCursorY() + 7);
+				TXT(30);
+				adrs = (((dcc_wissels - 1) * 4) + 1);
+				display.print(adrs); TXT(32); display.print(adrs + 3); TXT(31);
+				break;
+			case 3://seinen
+				TXT(9); regel2; display.print(dcc_seinen);
+				display.setTextSize(1);
+				display.setCursor(display.getCursorX(), display.getCursorY() + 7);
+				TXT(30);
+				adrs = (((dcc_seinen - 1) * 4) + 1);
+				display.print(adrs); TXT(32); display.print(adrs + 7); TXT(31);//seinen heeft 8 adressen 16 leds
+				break;
+			}
+			break;
 		case 3: //CV programming level 3 CV keuze
 			TXT_cv3();
 			// display.print(PRG_cvs[0]);
@@ -672,7 +806,8 @@ void DSP_prg() {
 			display.print(PRG_cvs[1]);
 			break;
 		}
-		break;	}
+		break;
+	}
 	DSP_buttons(10);
 	display.display();
 }
@@ -726,7 +861,7 @@ void TXT(byte t) {
 		display.print("Loco ");
 		break;
 	case 3:
-		display.print("Accessoire ");
+		display.print("3 = vrij ");
 		break;
 	case 4:
 		display.print("**** "); //niet in gebruik
@@ -737,8 +872,15 @@ void TXT(byte t) {
 	case 6:
 		display.print("W ");
 		break;
-
-
+	case 7:
+		display.print("Instellen ");
+		break;
+	case 8:
+		display.print("Wissels ");
+		break;
+	case 9:
+		display.print("Seinen ");
+		break;
 	case 10:
 		display.print("Schrijf ");
 		break;
@@ -749,6 +891,13 @@ void TXT(byte t) {
 		display.print(" -     +     V     X");
 		break;
 	case 30:
+		display.print(" (");
+		break;
+	case 31:
+		display.print(") ");
+		break;
+	case 32:
+		display.print("-");
 		break;
 	case 100:
 		display.print("0 ");
@@ -762,20 +911,10 @@ void TXT(byte t) {
 	case 110:
 		display.print(" ");
 		break;
+	case 255:
+		display.print("niet bepaald");
+		break;
 	}
-}
-void TXT_pv(boolean small, byte val) {
-	display.clearDisplay();
-	if (small == true) {
-		regel1s; TXT(1);
-		regel2s; TXT(2); display.println(val);
-	}
-	else {
-		regel1; TXT(1);
-		display.println("");
-		regel2; TXT(2); display.println(val);
-	}
-	DSP_buttons(10);
 }
 void loop() {	//slow events timer
 	count_slow++;
