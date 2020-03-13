@@ -210,6 +210,7 @@ void MEM_read() {
 void MEM_update() { //sets new values/ sends CV 
 	switch (PRG_fase) {
 	case 0: //loc1 adres
+
 		switch (PRG_typeDCC) {
 		case 0: //loc1
 			EEPROM.update(100, loc_adres[0]);
@@ -293,19 +294,20 @@ void DCC_endwrite() {
 
 	DSP_prg();
 }
-byte LOC_calc(byte num,byte loc) {
+void LOC_calc(byte loc) {
 	byte speed;
-	if (num == 0) {
+	if (loc_speedcount[loc] == 0) {
 		speed = B00010000; //direct stop
 	}
 	else {
-		speed = (num / 2) + 2;
-		if (num % 2 != 0) speed |= (1 << 4);// check if number is even
+		speed = (loc_speedcount[loc] / 2) + 2;
+		if (loc_speedcount[0] % 2 != 0) speed |= (1 << 4);// check if number is even
 	}
+
 	//richting loco
 	speed |= (1 << 6);
 	if (loc_reg[loc] & (1 << 0))speed |= (1 << 5);
-	return speed;
+	loc_speed[loc] = speed;
 }
 
 void PRG_locadres(byte newadres, byte all) {
@@ -327,16 +329,19 @@ void PRG_cv(byte adres, byte cv, byte value) { //CV programming
 	dcc_aantalBytes = 4;
 	count_repeat = 4;
 }
+
 void PRG_dec() {
 	//Serial.println(PRG_level);
 	switch (PRG_fase) {
 	case 0: //INstellen DCC adres
+
 		switch (PRG_level) {
 		case 2:  //dec voor welk loc, wissels of seinen
 			PRG_typeDCC--;
 			if (PRG_typeDCC > 3)PRG_typeDCC = 3;
 			break;
 		case 3://waarde DCC adres aanpassen
+
 			switch (PRG_typeDCC) {
 			case 0:
 				loc_adres[0]--;
@@ -357,7 +362,7 @@ void PRG_dec() {
 			}
 			break;
 		}
-
+		break;
 	case 1: //Testen
 		switch (PRG_level) {
 		case 2: //kiezen loc, wissels, seinen of melders
@@ -365,16 +370,11 @@ void PRG_dec() {
 			if (PRG_typeTest > 4)PRG_typeTest = 4;
 			break;
 		case 3:
+			if (PRG_typeTest < 2) {
+				if (loc_speedcount[PRG_typeTest] > 0)loc_speedcount[PRG_typeTest]--;
+				LOC_calc(PRG_typeTest);
+			}
 			switch (PRG_typeTest) {
-			case 0: //speed loc 1
-				if (loc_speedcount[0] > 0 )loc_speedcount[0]--;
-				loc_speed[0] = LOC_calc(loc_speedcount[0],0);
-				break;
-			case 1://loc 2
-
-				break;
-			case 2: //test wissels
-				break;
 			case 3: //test seinen
 				break;
 			case 4://test melders
@@ -382,13 +382,15 @@ void PRG_dec() {
 			}
 			break;
 		}
-		break;
-
+		//break;
+	//}
 	case 2: //write DCC
+
 		PRG_value--;
 		if (PRG_value > 1) PRG_value = 1; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
+
 	case 3: //write CV
 		switch (PRG_level) {
 		case 2: //parameter
@@ -447,26 +449,18 @@ void PRG_inc() {
 			if (PRG_typeTest > 4)PRG_typeTest = 0;
 			break;
 		case 3: //testen 
+			if (PRG_typeTest < 2) {
+				if (loc_speedcount[PRG_typeTest] < 27) loc_speedcount[PRG_typeTest]++;
+				LOC_calc(PRG_typeTest);
+			}
 			switch (PRG_typeTest) {
-			case 0: //speed loc 1
-				if(loc_speedcount[0] < 27) loc_speedcount[0]++;
-				
-				loc_speed[0] = LOC_calc(loc_speedcount[0],0);
-				break;
-			case 1: //speed loc 2
-				break;
-			case 2: //wissels test
-
-				break;
 			case 3: //seinen test
 				break;
 			case 4: //melders test
 				break;
 			}
-
 			break;
 		}
-
 		break;
 	case 2: //write DCC
 		PRG_value++;
@@ -672,9 +666,11 @@ void SW_PRG(byte sw) {
 				switch (PRG_typeTest) {
 				case 0: //loc 1
 					loc_reg[0] ^= (1 << 0);
-					loc_speed[0] = LOC_calc(loc_speedcount[0], 0);
+					LOC_calc(0);
 					break;
 				case 1: //loc 2
+					loc_reg[1] ^= (1 << 0);
+					LOC_calc(1);
 					break;
 				case 2: //wissels
 					break;
@@ -691,7 +687,12 @@ void SW_PRG(byte sw) {
 				break;
 			}
 			break;
+
 		case 3:
+			if (PRG_typeTest < 2) {
+				loc_speedcount[PRG_typeTest] = 0;
+				LOC_calc(PRG_typeTest);
+			}
 			PRG_level--;
 			MEM_cancel();
 			break;
@@ -898,10 +899,12 @@ void DSP_prg() {
 			break;
 		case 1: //Testen
 			cd; regel1s; TXT(11);
+
+
 			switch (PRG_typeTest) {
 			case 0:  //snelheid en richting loco1
 				TXT(2); TXT(101);
-				regel2; 
+				regel2;
 				if (loc_reg[0] & (1 << 0)) {
 					TXT(13);
 				}
@@ -914,6 +917,14 @@ void DSP_prg() {
 				break;
 			case 1:
 				TXT(2); TXT(102);
+				regel2;
+				if (loc_reg[1] & (1 << 0)) {
+					TXT(13);
+				}
+				else {
+					TXT(14);
+				}
+				display.print(loc_speedcount[1]);
 				buttons = 11;
 				break;
 			case 2:
