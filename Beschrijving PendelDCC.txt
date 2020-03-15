@@ -27,3 +27,4 @@ bit7	Active loco false=2; true=1
 COM reg 2 GPIOR1
 bit0 Write adres to loc true, false normal operation
 bit1 blocks DSP updates
+bit2 DCC send loc1 true or loc2 false

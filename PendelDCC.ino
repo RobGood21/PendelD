@@ -296,18 +296,27 @@ void DCC_endwrite() {
 }
 void LOC_calc(byte loc) {
 	byte speed;
-	if (loc_speedcount[loc] == 0) {
-		speed = B00010000; //direct stop
-	}
-	else {
-		speed = (loc_speedcount[loc] / 2) + 2;
-		if (loc_speedcount[0] % 2 != 0) speed |= (1 << 4);// check if number is even
-	}
+		//Serial.print(loc_speedcount[loc]);
+	//Serial.print(":  ");
+
+		if (loc_speedcount[loc] & (1 << 0)) { //oneven
+			speed = loc_speedcount[loc] / 2 + 2;
+		}
+		else { //even
+			
+			speed = loc_speedcount[loc] / 2 + 1;
+			speed |= (1 << 4);
+		}
+
+	
+
+//Serial.println(speed, BIN);
 
 	//richting loco
 	speed |= (1 << 6);
 	if (loc_reg[loc] & (1 << 0))speed |= (1 << 5);
 	loc_speed[loc] = speed;
+	
 }
 
 void PRG_locadres(byte newadres, byte all) {
@@ -341,7 +350,6 @@ void PRG_dec() {
 			if (PRG_typeDCC > 3)PRG_typeDCC = 3;
 			break;
 		case 3://waarde DCC adres aanpassen
-
 			switch (PRG_typeDCC) {
 			case 0:
 				loc_adres[0]--;
@@ -403,7 +411,7 @@ void PRG_dec() {
 			break;
 		case 4://Value
 			PRG_cvs[1]--;
-			if (PRG_cvs[1] < 1) PRG_cvs[1] = 255;
+			//if (PRG_cvs[1] < 1) PRG_cvs[1] = 255;
 			break;
 		}
 		break;
@@ -450,7 +458,7 @@ void PRG_inc() {
 			break;
 		case 3: //testen 
 			if (PRG_typeTest < 2) {
-				if (loc_speedcount[PRG_typeTest] < 27) loc_speedcount[PRG_typeTest]++;
+				if (loc_speedcount[PRG_typeTest] < 28) loc_speedcount[PRG_typeTest]++;
 				LOC_calc(PRG_typeTest);
 			}
 			switch (PRG_typeTest) {
@@ -479,29 +487,33 @@ void PRG_inc() {
 			break;
 		case 4://Value
 			PRG_cvs[1]++;
-			if (PRG_cvs[1] == 0) PRG_cvs[1] = 1;
+			//if (PRG_cvs[1] == 0) PRG_cvs[1] = 1;
 			break;
 		}
 		break;
 	}
 	//DSP_prg();
 }
-void DCC_command() { //nieuwe
+void DCC_command() { 
+	byte loc=0;
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
 		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV transmit
 	}
 	else { //send loc data
+		if (GPIOR1 & (1 << 2))loc = 1; //else loc=0
+
 		GPIOR0 ^= (1 << 0);
 		if (GPIOR0 & (1 << 0)) { //drive
-			dcc_data[0] = loc_adres[0];
-			dcc_data[1] = loc_speed[0];
+			dcc_data[0] = loc_adres[loc];
+			dcc_data[1] = loc_speed[loc];
 			dcc_aantalBytes = 2;
 		}
 		else { //function
-			dcc_data[0] = loc_adres[0];
-			dcc_data[1] = loc_function[0];
+			dcc_data[0] = loc_adres[loc];
+			dcc_data[1] = loc_function[loc];
 			dcc_aantalBytes = 2;
+			GPIOR1 ^=(1 << 2); //toggle locs
 		}
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
@@ -896,6 +908,7 @@ void DSP_prg() {
 				display.print(adrs); TXT(32); display.print(adrs + 7); TXT(31);//seinen heeft 8 adressen 16 leds
 				break;
 			}
+			buttons = 10;
 			break;
 		case 1: //Testen
 			cd; regel1s; TXT(11);
@@ -951,7 +964,7 @@ void DSP_prg() {
 		//Serial.println(PRG_level);
 		switch (PRG_fase) {
 		case 3:
-			TXT_cv3(); TXT(110); TXT(6);
+			TXT_cv3(); TXT(110);
 			display.print(PRG_cvs[1]);
 			break;
 		}
@@ -1004,13 +1017,6 @@ void DSP_settxt(byte X, byte Y, byte size) {
 	display.setTextColor(WHITE);
 	if (X + Y > 0) display.setCursor(X, Y);
 }
-byte DSP_speed(byte loco) {
-	byte spd;
-	spd = loc_speed[loco];
-	spd = spd << 3;
-	spd = spd >> 3;
-	return spd;
-}
 void TXT(byte t) {
 	switch (t) {
 	case 0:
@@ -1032,7 +1038,7 @@ void TXT(byte t) {
 		display.print("CV ");
 		break;
 	case 6:
-		display.print("W ");
+		display.print("Niet in gebruik");
 		break;
 	case 7:
 		display.print("Instellen ");
