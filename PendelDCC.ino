@@ -52,8 +52,6 @@ byte dcc_aantalBytes; //aantal bytes current van het DCC commando
 byte sw_statusC; //laatste stand van switches op C port
 byte sw_statusD; //D port
 
-byte dcc_cv[3];
-
 byte loc_reg[2];
 byte loc_adres[3]; //moet van EEPROM komen, 3e adres is voor programmeerttoepassing
 byte loc_speed[2]; //holds the speed bytes
@@ -62,12 +60,14 @@ byte loc_function[2]; //moet van EEPROM komen
 
 byte dcc_wissels; //dcc basis adres wissel decoder 
 byte dcc_seinen; //dcc basis adres sein decoder
+byte pos_wissels; //stand positie van de vier wissels
 
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
 byte PRG_typeDCC;
 byte PRG_typeTest;
-byte PRG_value; //ingestelde waarde op PRG_level 2
+byte prg_wissels; //actieve wissel
+byte prg_typecv; //ingestelde waarde op PRG_level 2
 
 byte PRG_cvs[2]; //0=CV 1=waarde
 
@@ -209,7 +209,7 @@ void MEM_read() {
 }
 void MEM_update() { //sets new values/ sends CV 
 	switch (PRG_fase) {
-	case 0: //loc1 adres
+	case 0: //DCC adressen
 
 		switch (PRG_typeDCC) {
 		case 0: //loc1
@@ -229,7 +229,7 @@ void MEM_update() { //sets new values/ sends CV
 		//****************************PROGRAM fase 2
 
 	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
-		switch (PRG_value) {
+		switch (prg_typecv) {
 		case 0: //loco 1
 			loc_adres[2] = loc_adres[0];
 			break;
@@ -237,26 +237,27 @@ void MEM_update() { //sets new values/ sends CV
 			loc_adres[2] = loc_adres[1];
 			break;
 		}
-
 		GPIOR1 |= (1 << 1); //blocks display updates 
 		count_wa = 0;
 		GPIOR1 |= (1 << 0); //enable dcc adress write to loc//DCC_write();			
 		break;
 		//*****************************Programfase 3
 	case 3: //program CV
-		//PRG_value 0=loco1; 1=loco2; 2=accessoire
+		//prg_typecv 0=loco1; 1=loco2; 2=accessoire
 		//CVs[0]=CV; CVs[1]=Value
-		switch (PRG_value) {
+		switch (prg_typecv) {
 		case 0:
-			//Serial.println("CV schrijven");
-			PRG_cv(loc_adres[0], PRG_cvs[0], PRG_cvs[1]);
+			if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
+				//Serial.println("CV schrijven");
+				DCC_cv(true,loc_adres[0], PRG_cvs[0], PRG_cvs[1]);
+					break;
+		case 1://loco 2
+			DCC_cv(true,loc_adres[1], PRG_cvs[0], PRG_cvs[1]);
+				break;
+		case 2: //wissels
+			DCC_cv(false,dcc_wissels,PRG_cvs[0], PRG_cvs[1]);
 			break;
-		case 1:
-			PRG_cv(loc_adres[1], PRG_cvs[0], PRG_cvs[1]);
-			break;
-		case 2: //voor accesoire nog maken. andere structuur
-
-			break;
+			}
 		}
 		break;
 	}
@@ -280,7 +281,7 @@ void DCC_write() {
 			DCC_endwrite();
 		}
 		else {
-			PRG_cv(count_wa, 1, loc_adres[2]); //merk op loc adres 3 =s het adres van dan actief loc
+			DCC_cv(true,count_wa, 1, loc_adres[2]); //merk op loc adres 3 =s het adres van dan actief loc
 			display.drawPixel(count_wa, 40, WHITE);
 			display.drawPixel(count_wa, 41, WHITE);
 			display.display();
@@ -294,29 +295,67 @@ void DCC_endwrite() {
 
 	DSP_prg();
 }
+void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
+	byte da;
+	//ws=wissel of sein
+	//num is welk volgnummer
+	//maakt commandoos voor accessoires, wissels, seinen
+	//poort true is afbuigend
+	dcc_data[1] = B11110001;
+	dcc_data[0] = 0x00;
+	if (ws) { //true seinen
+		da = dcc_seinen;
+		//hier nog iets met adres ophoging bij de volgende decoder 
+	}
+	else { //wissels
+		da = dcc_wissels;
+	}
+	//adres bepalen, max 255 decoderadressen
+	if (da - 128 >= 0) {
+		dcc_data[1] &= ~(1 << 5);
+		da = da - 128;
+	}
+	if (da - 64 >= 0) {
+		dcc_data[1] &= ~(1 << 4);
+		da = da - 64;
+	}
+	//da=rest adres
+	dcc_data[0] = da; dcc_data[0] |= (1 << 7);
+
+	if (onoff)dcc_data[1] |= (1 << 3);
+	dcc_data[1] |= (channel << 1);
+	if (poort)dcc_data[1] &=~(1 << 0);
+	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
+	dcc_aantalBytes = 2;
+	GPIOR0 |= (1 << 2); //start zenden accessoire	
+	
+	Serial.print("bytes: ");
+	Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
+	
+}
 void LOC_calc(byte loc) {
 	byte speed;
-		//Serial.print(loc_speedcount[loc]);
-	//Serial.print(":  ");
+	//Serial.print(loc_speedcount[loc]);
+//Serial.print(":  ");
 
-		if (loc_speedcount[loc] & (1 << 0)) { //oneven
-			speed = loc_speedcount[loc] / 2 + 2;
-		}
-		else { //even
-			
-			speed = loc_speedcount[loc] / 2 + 1;
-			speed |= (1 << 4);
-		}
+	if (loc_speedcount[loc] & (1 << 0)) { //oneven
+		speed = loc_speedcount[loc] / 2 + 2;
+	}
+	else { //even
 
-	
+		speed = loc_speedcount[loc] / 2 + 1;
+		speed |= (1 << 4);
+	}
 
-//Serial.println(speed, BIN);
 
-	//richting loco
+
+	//Serial.println(speed, BIN);
+
+		//richting loco
 	speed |= (1 << 6);
 	if (loc_reg[loc] & (1 << 0))speed |= (1 << 5);
 	loc_speed[loc] = speed;
-	
+
 }
 
 void PRG_locadres(byte newadres, byte all) {
@@ -324,26 +363,25 @@ void PRG_locadres(byte newadres, byte all) {
 	//and programs EEPROM 
 
 }
-void PRG_cv(byte adres, byte cv, byte value) { //CV programming
+void DCC_cv(boolean type,byte adres, byte cv, byte value) { //CV programming
+	//type loco= true, acc is false
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
-	dcc_data[0] = adres; // B00000000; //
-	//dcc_data[0] = 0x00; //broadcast adres??
+	dcc_data[0] = adres;
 	dcc_data[1] = B11101100; //instruction write CV
+
 	dcc_data[2] = cv;
 	dcc_data[3] = value; //adres 6
 	dcc_data[4] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3];
 	dcc_aantalBytes = 4;
 	count_repeat = 4;
 }
-
 void PRG_dec() {
 	//Serial.println(PRG_level);
 	switch (PRG_fase) {
 	case 0: //INstellen DCC adres
-
 		switch (PRG_level) {
 		case 2:  //dec voor welk loc, wissels of seinen
 			PRG_typeDCC--;
@@ -383,6 +421,10 @@ void PRG_dec() {
 				LOC_calc(PRG_typeTest);
 			}
 			switch (PRG_typeTest) {
+			case 2: //Wissels testen
+				prg_wissels--;
+				if (prg_wissels > 3)prg_wissels = 3;
+				break;
 			case 3: //test seinen
 				break;
 			case 4://test melders
@@ -393,17 +435,16 @@ void PRG_dec() {
 		//break;
 	//}
 	case 2: //write DCC
-
-		PRG_value--;
-		if (PRG_value > 1) PRG_value = 1; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		prg_typecv--;
+		if (prg_typecv > 2) prg_typecv = 2; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
 
 	case 3: //write CV
 		switch (PRG_level) {
 		case 2: //parameter
-			PRG_value--;
-			if (PRG_value > 2) PRG_value = 2; //instellen dcc accessoire 2 loc1 en loc2		
+			prg_typecv--;
+			if (prg_typecv > 3) prg_typecv = 3; //instellen dcc accessoire 2 loc1 en loc2		
 			break;
 		case 3: //CV
 			PRG_cvs[0]--;
@@ -462,6 +503,10 @@ void PRG_inc() {
 				LOC_calc(PRG_typeTest);
 			}
 			switch (PRG_typeTest) {
+			case 2: //wissels test
+				prg_wissels++;
+				if (prg_wissels > 3)prg_wissels = 0;
+				break;
 			case 3: //seinen test
 				break;
 			case 4: //melders test
@@ -471,15 +516,15 @@ void PRG_inc() {
 		}
 		break;
 	case 2: //write DCC
-		PRG_value++;
-		if (PRG_value > 1) PRG_value = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		prg_typecv++;
+		if (prg_typecv > 3) prg_typecv = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
 	case 3: //write CV
 		switch (PRG_level) {
 		case 2:
-			PRG_value++;
-			if (PRG_value > 2) PRG_value = 0; //instellen dcc accessoire 2 loc1 en loc2		
+			prg_typecv++;
+			if (prg_typecv > 3) prg_typecv = 0; //keuze locs, wissels, seinen	
 			break;
 		case 3:
 			PRG_cvs[0]++;
@@ -494,11 +539,11 @@ void PRG_inc() {
 	}
 	//DSP_prg();
 }
-void DCC_command() { 
-	byte loc=0;
+void DCC_command() {
+	byte loc = 0;
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
-		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV transmit
+		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
 	}
 	else { //send loc data
 		if (GPIOR1 & (1 << 2))loc = 1; //else loc=0
@@ -513,7 +558,7 @@ void DCC_command() {
 			dcc_data[0] = loc_adres[loc];
 			dcc_data[1] = loc_function[loc];
 			dcc_aantalBytes = 2;
-			GPIOR1 ^=(1 << 2); //toggle locs
+			GPIOR1 ^= (1 << 2); //toggle locs
 		}
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
@@ -595,7 +640,6 @@ void SW_on(byte sw) {
 	}
 }
 void SW_PRG(byte sw) {
-	boolean end = false;
 	switch (PRG_level) {
 		//++++++++LEVEL 1
 	case 1:	//Soort instelling	
@@ -638,21 +682,17 @@ void SW_PRG(byte sw) {
 				PRG_level++;
 				break;
 			case 2: //schrijf dcc adres
-				end = true;
+				MEM_update();
+				PRG_level--;
 				break;
 			case 3:
 				PRG_level++;
 				break;
 			}
-
-			if (end == true) {
-				MEM_update();
-				PRG_level--;
-			}
 			break;
+
 		case 3:
 			PRG_level--;
-			//GPIOR0 &= ~(1 << 6);
 			MEM_cancel();
 			break;
 		}
@@ -674,6 +714,7 @@ void SW_PRG(byte sw) {
 				PRG_level--;
 				MEM_update();
 				break;
+
 			case 1: //Testen
 				switch (PRG_typeTest) {
 				case 0: //loc 1
@@ -685,6 +726,12 @@ void SW_PRG(byte sw) {
 					LOC_calc(1);
 					break;
 				case 2: //wissels
+					if (GPIOR0 & ~(1 << 2)) {
+						//Serial.println("vrij");
+						pos_wissels ^= (1 << prg_wissels);
+						//Wissel direct omleggen
+						DCC_acc(0, 1, prg_wissels, (pos_wissels & (1 << prg_wissels)));
+					}
 					break;
 				case 3: //seinen
 					break;
@@ -714,7 +761,7 @@ void SW_PRG(byte sw) {
 		//********Level 4
 	case 4:
 		switch (PRG_fase) {
-		case 3:
+		case 3: //CV waarde instellen en bevestigen
 			switch (sw) {
 			case 0:
 				PRG_dec();
@@ -723,7 +770,7 @@ void SW_PRG(byte sw) {
 				PRG_inc();
 				break;
 			case 2:
-				MEM_update();
+				MEM_update(); //bevestigen en zenden
 				PRG_level--;
 				break;
 			case 3:
@@ -776,6 +823,7 @@ void DSP_start() {
 void DSP_prg() {
 	int adrs;
 	byte buttons;
+	byte position = 5;
 	switch (PRG_level) {
 		//**********************
 	case 1: //soort instelling
@@ -848,7 +896,7 @@ void DSP_prg() {
 
 		case 2: //Write adres in loc and accessoires
 			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
-			switch (PRG_value) {
+			switch (prg_typecv) {
 			case 0:
 				TXT(101);
 				break;
@@ -861,15 +909,18 @@ void DSP_prg() {
 		case 3: //CV programming
 			cd; regel1s; TXT(10); TXT(5); regel2;
 
-			switch (PRG_value) {
+			switch (prg_typecv) {
 			case 0: //loc1
 				TXT(2); TXT(101);
 				break;
 			case 1: //loc2
 				TXT(2); TXT(102);
 				break;
-			case 2://accessoire
-				TXT(3);
+			case 2://wissels
+				TXT(8);
+				break;
+			case 3: //Seinen
+				TXT(9);
 				break;
 			}
 			buttons = 10;
@@ -912,8 +963,6 @@ void DSP_prg() {
 			break;
 		case 1: //Testen
 			cd; regel1s; TXT(11);
-
-
 			switch (PRG_typeTest) {
 			case 0:  //snelheid en richting loco1
 				TXT(2); TXT(101);
@@ -926,9 +975,9 @@ void DSP_prg() {
 				}
 				display.print(loc_speedcount[0]);
 				buttons = 11;
-
 				break;
-			case 1:
+
+			case 1: //Loco 2
 				TXT(2); TXT(102);
 				regel2;
 				if (loc_reg[1] & (1 << 0)) {
@@ -940,13 +989,25 @@ void DSP_prg() {
 				display.print(loc_speedcount[1]);
 				buttons = 11;
 				break;
-			case 2:
+			case 2: //Test wissels
 				TXT(8);
+				display.drawRect(1 + (32 * (prg_wissels)), 18, 30, 23, WHITE); //x,y, width, height
+
+				for (byte i = 0; i < 4; i++) {
+					if (pos_wissels & (1 << i)) {
+						display.drawLine(position, 35, position + 21, 25, WHITE);
+					}
+					else {
+						display.drawLine(position, 30, position + 21, 30, WHITE);
+					}
+					position = position + 32;
+				}
+				buttons = 12;
 				break;
-			case 3:
+			case 3: //Test seinen
 				TXT(9);
 				break;
-			case 4:
+			case 4: //Test melders
 				TXT(3);
 				break;
 			}
@@ -977,7 +1038,7 @@ void DSP_prg() {
 }
 void TXT_cv3() {
 	cd; regel1s; TXT(10); TXT(5);
-	switch (PRG_value) {
+	switch (prg_typecv) {
 	case 0:
 		TXT(2); TXT(101);
 		break;
@@ -1006,6 +1067,9 @@ void DSP_buttons(byte mode) {
 		break;
 	case 11: //Loc testen balk 
 		TXT(22);
+		break;
+	case 12: //testen wissels
+		TXT(23);
 		break;
 
 	default:
@@ -1064,6 +1128,7 @@ void TXT(byte t) {
 	case 14:
 		display.print(">>> ");
 		break;
+		
 		//***********Onderbalken
 	case 20:
 		display.print("Start  loco   FL  F1");
@@ -1073,6 +1138,9 @@ void TXT(byte t) {
 		break;
 	case 22:
 		display.print("S-    S+     <>    X");
+		break;
+	case 23:
+		display.print(" <    >     []     X");
 		//******************
 	case 30:
 		display.print(" (");
