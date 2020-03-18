@@ -47,7 +47,7 @@ int count_slow;
 byte count_wa; //write adres
 
 byte dcc_fase;
-byte dcc_data[5]; //bevat te verzenden DCC bytes, current DCC commando
+byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
 byte dcc_aantalBytes; //aantal bytes current van het DCC commando
 byte sw_statusC; //laatste stand van switches op C port
 byte sw_statusD; //D port
@@ -173,7 +173,6 @@ ISR(TIMER2_COMPA_vect) {
 					FalseBit;
 				}
 				else { //command send reset	
-
 					dcc_fase = 0;
 					TrueBit;
 				}
@@ -249,13 +248,13 @@ void MEM_update() { //sets new values/ sends CV
 		case 0:
 			if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
 				//Serial.println("CV schrijven");
-				DCC_cv(true,loc_adres[0], PRG_cvs[0], PRG_cvs[1]);
-					break;
-		case 1://loco 2
-			DCC_cv(true,loc_adres[1], PRG_cvs[0], PRG_cvs[1]);
+				DCC_cv(true, loc_adres[0], PRG_cvs[0], PRG_cvs[1]);
 				break;
+		case 1://loco 2
+			DCC_cv(true, loc_adres[1], PRG_cvs[0], PRG_cvs[1]);
+			break;
 		case 2: //wissels
-			DCC_cv(false,dcc_wissels,PRG_cvs[0], PRG_cvs[1]);
+			DCC_cv(false, dcc_wissels, PRG_cvs[0], PRG_cvs[1]);
 			break;
 			}
 		}
@@ -281,7 +280,7 @@ void DCC_write() {
 			DCC_endwrite();
 		}
 		else {
-			DCC_cv(true,count_wa, 1, loc_adres[2]); //merk op loc adres 3 =s het adres van dan actief loc
+			DCC_cv(true, count_wa, 1, loc_adres[2]); //merk op loc adres 3 =s het adres van dan actief loc
 			display.drawPixel(count_wa, 40, WHITE);
 			display.drawPixel(count_wa, 41, WHITE);
 			display.display();
@@ -301,8 +300,7 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	//num is welk volgnummer
 	//maakt commandoos voor accessoires, wissels, seinen
 	//poort true is afbuigend
-	dcc_data[1] = B11110001;
-	dcc_data[0] = 0x00;
+
 	if (ws) { //true seinen
 		da = dcc_seinen;
 		//hier nog iets met adres ophoging bij de volgende decoder 
@@ -310,6 +308,24 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	else { //wissels
 		da = dcc_wissels;
 	}
+	DCC_accAdres(da);
+
+	if (onoff)dcc_data[1] |= (1 << 3);
+	dcc_data[1] |= (channel << 1);
+	if (poort)dcc_data[1] &= ~(1 << 0);
+
+	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
+	dcc_aantalBytes = 2;
+	count_repeat = 4;
+	GPIOR0 |= (1 << 2); //start zenden accessoire	
+
+	//Serial.print("bytes: ");
+	//Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
+
+}
+void DCC_accAdres(byte da) {
+	dcc_data[0] = 0x00;
+	dcc_data[1] = B11110001;
 	//adres bepalen, max 255 decoderadressen
 	if (da - 128 >= 0) {
 		dcc_data[1] &= ~(1 << 5);
@@ -321,17 +337,6 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	}
 	//da=rest adres
 	dcc_data[0] = da; dcc_data[0] |= (1 << 7);
-
-	if (onoff)dcc_data[1] |= (1 << 3);
-	dcc_data[1] |= (channel << 1);
-	if (poort)dcc_data[1] &=~(1 << 0);
-	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
-	dcc_aantalBytes = 2;
-	GPIOR0 |= (1 << 2); //start zenden accessoire	
-	
-	Serial.print("bytes: ");
-	Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
-	
 }
 void LOC_calc(byte loc) {
 	byte speed;
@@ -346,12 +351,7 @@ void LOC_calc(byte loc) {
 		speed = loc_speedcount[loc] / 2 + 1;
 		speed |= (1 << 4);
 	}
-
-
-
-	//Serial.println(speed, BIN);
-
-		//richting loco
+	//richting loco
 	speed |= (1 << 6);
 	if (loc_reg[loc] & (1 << 0))speed |= (1 << 5);
 	loc_speed[loc] = speed;
@@ -363,20 +363,47 @@ void PRG_locadres(byte newadres, byte all) {
 	//and programs EEPROM 
 
 }
-void DCC_cv(boolean type,byte adres, byte cv, byte value) { //CV programming
+void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 	//type loco= true, acc is false
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
-	dcc_data[0] = adres;
-	dcc_data[1] = B11101100; //instruction write CV
 
-	dcc_data[2] = cv;
-	dcc_data[3] = value; //adres 6
-	dcc_data[4] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3];
-	dcc_aantalBytes = 4;
-	count_repeat = 4;
+	if (type) { //locomotive
+		dcc_data[0] = adres;
+		dcc_data[1] = B11101100; //instruction write CV
+		dcc_data[2] = cv;
+		dcc_data[3] = value; //adres 6
+		dcc_data[4] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3];
+		dcc_aantalBytes = 4;
+		count_repeat = 4;
+	}
+	else { //accessoire
+		Serial.println("CV sturen accessoire");
+
+		DCC_accAdres(adres); //fills byte 0 and byte 1
+		dcc_data[1] &= ~(15 << 0); //clear bits 0~3
+		dcc_data[2] = B11101100;
+		dcc_data[3] = cv;
+		dcc_data[4] = value;
+		dcc_data[5] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3] ^ dcc_data[4];
+		dcc_aantalBytes = 5;
+		count_repeat = 4;
+
+		Serial.print("bytes: ");
+		Serial.print(dcc_data[0], BIN);
+		Serial.print(" ");
+		Serial.print(dcc_data[1], BIN);
+		Serial.print(" ");
+		Serial.print(dcc_data[2], BIN);
+		Serial.print(" ");
+		Serial.print(dcc_data[3], BIN);
+		Serial.print(" ");
+		Serial.print(dcc_data[4], BIN);
+		Serial.print(" ");
+		Serial.println(dcc_data[5], BIN);
+	}
 }
 void PRG_dec() {
 	//Serial.println(PRG_level);
@@ -544,6 +571,7 @@ void DCC_command() {
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
 		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
+		Serial.println("send");
 	}
 	else { //send loc data
 		if (GPIOR1 & (1 << 2))loc = 1; //else loc=0
@@ -1128,7 +1156,7 @@ void TXT(byte t) {
 	case 14:
 		display.print(">>> ");
 		break;
-		
+
 		//***********Onderbalken
 	case 20:
 		display.print("Start  loco   FL  F1");
@@ -1170,7 +1198,9 @@ void TXT(byte t) {
 }
 void loop() {	//slow events timer
 	count_slow++;
-	if (count_slow > 10000) { //10000 makes frequency of command sending important 5000 is too fast
+	if (count_slow > 12000) { 
+		//12000 is hoe snel de commandoos elkaar opvolgen vooral lange commandoos als CV accessoires
+		//bij 10000 werk dit niet misschien nog wat fine tunen...
 		count_slow = 0;
 		//slow events
 		SW_exe(); //switches
