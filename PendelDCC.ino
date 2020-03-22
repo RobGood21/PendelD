@@ -61,12 +61,14 @@ byte loc_function[2]; //moet van EEPROM komen
 byte dcc_wissels; //dcc basis adres wissel decoder 
 byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
+byte pos_seinen[2]; //stand positie van de seinen
 
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
-byte PRG_typeDCC;
-byte PRG_typeTest;
+byte PRG_typeDCC; //actieve adres
+byte PRG_typeTest; //actieve test
 byte prg_wissels; //actieve wissel
+byte prg_sein; //actief sein 16x
 byte prg_typecv; //ingestelde waarde op PRG_level 2
 
 byte PRG_cvs[2]; //0=CV 1=waarde
@@ -85,10 +87,14 @@ void setup() {
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
-	DDRD &= ~(1 << 7);
-	PORTD |= (1 << 7); //set PIN7 pullup register
+
+	DDRD &= 0x00;
+	PORTD = 0xFF; //port D as inputs with pull ups 
 
 	DDRB |= (1 << 0); //PIN8 as output enable DCC
+
+	PORTB |= (1 << 1); //puuup to pin 9
+
 
 	sw_statusC = 0xFF;
 	sw_statusD = 0xFF;
@@ -200,7 +206,7 @@ void MEM_read() {
 	}
 	dcc_seinen = EEPROM.read(103); //heeft 8 dcc kanalen(16 leds)
 	if (dcc_seinen == 0xFF) {
-		dcc_seinen = 254;
+		dcc_seinen = 252;
 		EEPROM.update(103, dcc_seinen);
 	}
 	//default=0xFF 255
@@ -430,7 +436,7 @@ void PRG_dec() {
 				break;
 			case 3:
 				dcc_seinen--;
-				if (dcc_seinen == 0)dcc_seinen = 254;
+				if (dcc_seinen == 0)dcc_seinen = 252;
 				break;
 			}
 			break;
@@ -442,7 +448,7 @@ void PRG_dec() {
 			PRG_typeTest--;
 			if (PRG_typeTest > 4)PRG_typeTest = 4;
 			break;
-		case 3:
+		case 3: //prglevel3
 			if (PRG_typeTest < 2) {
 				if (loc_speedcount[PRG_typeTest] > 0)loc_speedcount[PRG_typeTest]--;
 				LOC_calc(PRG_typeTest);
@@ -453,6 +459,8 @@ void PRG_dec() {
 				if (prg_wissels > 3)prg_wissels = 3;
 				break;
 			case 3: //test seinen
+				prg_sein--;
+				if (prg_sein > 15)prg_sein = 15;
 				break;
 			case 4://test melders
 				break;
@@ -488,7 +496,7 @@ void PRG_dec() {
 }
 void PRG_inc() {
 	switch (PRG_fase) {
-	case 0: //inc DCC van loc, wissels of seinen
+	case 0: //inc DCC adres van loc, wissels of seinen
 		switch (PRG_level) {
 		case 2:
 			PRG_typeDCC++;
@@ -510,7 +518,7 @@ void PRG_inc() {
 				break;
 			case 3:
 				dcc_seinen++;
-				if (dcc_seinen > 254)dcc_seinen = 1;
+				if (dcc_seinen > 252)dcc_seinen = 1;
 				break;
 			}
 			break;
@@ -535,6 +543,8 @@ void PRG_inc() {
 				if (prg_wissels > 3)prg_wissels = 0;
 				break;
 			case 3: //seinen test
+				prg_sein++;
+				if (prg_sein > 15)prg_sein = 0;
 				break;
 			case 4: //melders test
 				break;
@@ -594,16 +604,17 @@ void DCC_command() {
 void SW_exe() {
 	byte poort; byte changed;
 	GPIOR0 ^= (1 << 4);
-
 	if (GPIOR0 & (1 << 4)) {
-		poort = PIND;
-		changed = poort ^ sw_statusD;
-		for (byte i = 7; i > 6; i--) {
-			if (changed & (1 << i) & ~poort & (1 << i)) {
-				SW_on(7 - i + 4);
+		
+		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
+			if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
+			if (PINB & (1 << 1)) {
+				GPIOR1 |= (1 << 3);
+			}
+			else {
+				GPIOR1 &= ~(1 << 3);
 			}
 		}
-		sw_statusD = poort;
 	}
 	else {
 		poort = PINC;
@@ -647,24 +658,12 @@ void SW_on(byte sw) {
 			return;
 		}
 		break;
-	case 4:
-		PINB |= (1 << 0); //no DCC
-		break;
-	case 5:
-		break;
-	case 6:
-		break;
-	case 7:
-		break;
 	}
-
-	if (sw < 4) {
-		if (GPIOR0 & (1 << 5)) { //programmode, kan misschien met checken prg_level?
-			SW_PRG(sw);
-		}
-		else {
-			SW_pendel(sw);
-		}
+	if (GPIOR0 & (1 << 5)) { //programmode, kan misschien met checken prg_level?
+		SW_PRG(sw);
+	}
+	else {
+		SW_pendel(sw);
 	}
 }
 void SW_PRG(byte sw) {
@@ -761,7 +760,9 @@ void SW_PRG(byte sw) {
 						DCC_acc(0, 1, prg_wissels, (pos_wissels & (1 << prg_wissels)));
 					}
 					break;
-				case 3: //seinen
+				case 3: //seinen lvl3, omzetten sein decoders
+
+
 					break;
 				case 4://melders
 					break;
@@ -852,6 +853,8 @@ void DSP_prg() {
 	int adrs;
 	byte buttons;
 	byte position = 5;
+	byte temp;
+	boolean stand;
 	switch (PRG_level) {
 		//**********************
 	case 1: //soort instelling
@@ -984,7 +987,9 @@ void DSP_prg() {
 				display.setCursor(display.getCursorX(), display.getCursorY() + 7);
 				TXT(30);
 				adrs = (((dcc_seinen - 1) * 4) + 1);
-				display.print(adrs); TXT(32); display.print(adrs + 7); TXT(31);//seinen heeft 8 adressen 16 leds
+				display.print(adrs); TXT(32); display.print(adrs + 15); TXT(31);//seinen heeft 16 adressen max 32 leds
+
+
 				break;
 			}
 			buttons = 10;
@@ -1032,10 +1037,31 @@ void DSP_prg() {
 				}
 				buttons = 12;
 				break;
-			case 3: //Test seinen
-				TXT(9);
+			case 3: //Test seinen (lvl3)
+				display.drawRect(87, 0, 28, 45, WHITE);
+				temp = prg_sein;
+				TXT(9); //Testen Seinen
+				regel2;TXT(15);
+				temp = (temp >> 1);
+				display.print(temp+1); TXT(32);
+				if (prg_sein & (1 << 0)) {
+					TXT(102);
+					if (pos_seinen[1] & (1 << temp))stand = true;
+				}
+				else {
+					TXT(101);
+					if (pos_seinen[0] & (1 << temp))stand = true;
+				}
+				//grafisch weergeven stand sein 
+				if (stand) {
+					display.fillCircle(101, 12, 8, WHITE);
+				}
+				else {
+
+				}
+				buttons = 12;
 				break;
-			case 4: //Test melders
+			case 4: //Test melders (lvl3)
 				TXT(3);
 				break;
 			}
@@ -1089,14 +1115,13 @@ void DSP_buttons(byte mode) {
 	case 0:
 		TXT(20);
 		break;
-
 	case 10: //standaard programmeer balk
 		TXT(21);
 		break;
 	case 11: //Loc testen balk 
 		TXT(22);
 		break;
-	case 12: //testen wissels
+	case 12: //testen wissels/seinen
 		TXT(23);
 		break;
 
@@ -1156,7 +1181,9 @@ void TXT(byte t) {
 	case 14:
 		display.print(">>> ");
 		break;
-
+	case 15:
+		display.print("S ");
+		break;
 		//***********Onderbalken
 	case 20:
 		display.print("Start  loco   FL  F1");
@@ -1198,7 +1225,7 @@ void TXT(byte t) {
 }
 void loop() {	//slow events timer
 	count_slow++;
-	if (count_slow > 12000) { 
+	if (count_slow > 12000) {
 		//12000 is hoe snel de commandoos elkaar opvolgen vooral lange commandoos als CV accessoires
 		//bij 10000 werk dit niet misschien nog wat fine tunen...
 		count_slow = 0;

@@ -8,9 +8,29 @@ PB3; PIN 11  is compare match register timer 2 gebruiken voor DCC output PIN
 loc_reg
 bit0 direction true forward, false reverse
 
+PINS
+1	melder 1
+2	melder 2
+3	melder 3
+4	melder 4
+5	melder 5
+6	melder 6
+7	melder 7
+8	DCC data out
+9	DCC on/off switch
+10
+11	DCC enable
+12
+13
+A0	switch 0
+A1	switch 1
+A2	switch 2
+A3	switch 3
+A4	display SDA
+A5	display SCK
 
 dcc_commandreg
-bit7 command valid true, zenden, bij false idle byte sturen
+bit710 command valid true, zenden, bij false idle byte sturen
 bit6 true lok command, blijven herhalen
 
 
@@ -28,3 +48,4 @@ COM reg 2 GPIOR1
 bit0 Write adres to loc true, false normal operation
 bit1 blocks DSP updates
 bit2 DCC send loc1 true or loc2 false
+bit3 switch status pin 9 (portB bit1)
