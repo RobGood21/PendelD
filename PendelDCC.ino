@@ -301,12 +301,10 @@ void DCC_endwrite() {
 	DSP_prg();
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
-	byte da;
-	//ws=wissel of sein
+	byte da;	//ws=wissel of sein
 	//num is welk volgnummer
 	//maakt commandoos voor accessoires, wissels, seinen
 	//poort true is afbuigend
-
 	if (ws) { //true seinen
 		da = dcc_seinen;
 		//hier nog iets met adres ophoging bij de volgende decoder 
@@ -605,7 +603,7 @@ void SW_exe() {
 	byte poort; byte changed;
 	GPIOR0 ^= (1 << 4);
 	if (GPIOR0 & (1 << 4)) {
-		
+
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
 			if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
 			if (PINB & (1 << 1)) {
@@ -667,6 +665,7 @@ void SW_on(byte sw) {
 	}
 }
 void SW_PRG(byte sw) {
+	byte temp;
 	switch (PRG_level) {
 		//++++++++LEVEL 1
 	case 1:	//Soort instelling	
@@ -761,8 +760,19 @@ void SW_PRG(byte sw) {
 					}
 					break;
 				case 3: //seinen lvl3, omzetten sein decoders
+					temp = prg_sein >> 1;
+					GPIOR1 &= ~(1 << 7); //clear flag
+					if (prg_sein & (1 << 0))GPIOR1 |= (1 << 7); // temp boolean
+					if (GPIOR1 & (1 << 7)) {
+						pos_seinen[0] ^= (1 << temp);
+					}
+					else {
+						pos_seinen[1] ^= (1 << temp);
+					}
+					Serial.print(pos_seinen[0], BIN); Serial.print("  ");
+					Serial.println(pos_seinen[1], BIN);
 
-
+					//hier nog de verzending van dcc commando
 					break;
 				case 4://melders
 					break;
@@ -854,7 +864,6 @@ void DSP_prg() {
 	byte buttons;
 	byte position = 5;
 	byte temp;
-	boolean stand;
 	switch (PRG_level) {
 		//**********************
 	case 1: //soort instelling
@@ -1038,28 +1047,23 @@ void DSP_prg() {
 				buttons = 12;
 				break;
 			case 3: //Test seinen (lvl3)
-				display.drawRect(87, 0, 28, 45, WHITE);
-				temp = prg_sein;
+				display.drawRect(88, 0, 27, 45, WHITE);
+				//temp = prg_sein;
 				TXT(9); //Testen Seinen
-				regel2;TXT(15);
-				temp = (temp >> 1);
-				display.print(temp+1); TXT(32);
+				regel2; TXT(15);
+				temp = (prg_sein >> 1);
+				display.print(temp + 1); TXT(32);
+				position = 32;
 				if (prg_sein & (1 << 0)) {
 					TXT(102);
-					if (pos_seinen[1] & (1 << temp))stand = true;
+					if (pos_seinen[0] & (1 << temp))position = 12;
 				}
 				else {
 					TXT(101);
-					if (pos_seinen[0] & (1 << temp))stand = true;
+					if (pos_seinen[1] & (1 << temp))position = 12;
 				}
-				//grafisch weergeven stand sein 
-				if (stand) {
-					display.fillCircle(101, 12, 8, WHITE);
-				}
-				else {
-
-				}
-				buttons = 12;
+				display.fillCircle(101, position, 8, WHITE);
+				buttons = 13;
 				break;
 			case 4: //Test melders (lvl3)
 				TXT(3);
