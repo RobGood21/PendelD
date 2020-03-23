@@ -301,46 +301,39 @@ void DCC_endwrite() {
 	DSP_prg();
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
-	//gebleven
 	byte da;	//ws=wissel of sein
 	//num is welk volgnummer
 	//maakt commandoos voor accessoires, wissels, seinen
 	//poort true is afbuigend
 	if (ws) { //true seinen
 		da = dcc_seinen;
-		Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
-		Serial.print("adres: "); Serial.print(da); Serial.print("  ");
-		Serial.print("Poort: "); Serial.println(poort);
-		Serial.println("*********");
+		//Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
+		//Serial.print("adres: "); Serial.print(da); Serial.print("  ");
+		//Serial.print("Poort: "); Serial.println(poort);
+		//Serial.println("*********");
 		while (channel > 3) {
 			da++;
 			channel = channel - 4;
 		}
-		Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
-		Serial.print("adres: "); Serial.print(da); Serial.print("  ");
-		Serial.print("Poort: "); Serial.println(poort);
-		Serial.println("");
-
-
+		//Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
+		//Serial.print("adres: "); Serial.print(da); Serial.print("  ");
+		//Serial.print("Poort: "); Serial.println(poort);
+		//Serial.println("");
 		//hier nog iets met adres ophoging bij de volgende decoder 
 	}
 	else { //wissels
 		da = dcc_wissels;
 	}
 	DCC_accAdres(da);
-
 	if (onoff)dcc_data[1] |= (1 << 3);
 	dcc_data[1] |= (channel << 1);
 	if (poort)dcc_data[1] &= ~(1 << 0);
-
 	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	dcc_aantalBytes = 2;
 	count_repeat = 4;
 	GPIOR0 |= (1 << 2); //start zenden accessoire	
-
 	//Serial.print("bytes: ");
 	//Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
-
 }
 void DCC_accAdres(byte da) {
 	dcc_data[0] = 0x00;
@@ -376,7 +369,6 @@ void LOC_calc(byte loc) {
 	loc_speed[loc] = speed;
 
 }
-
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
 	//and programs EEPROM 
@@ -484,15 +476,14 @@ void PRG_dec() {
 	//}
 	case 2: //write DCC
 		prg_typecv--;
-		if (prg_typecv > 2) prg_typecv = 2; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
-		//GPIOR0 ^= (1 << 7);
+		if (prg_typecv > 1) prg_typecv = 1; //loco 1 of loco 2
 		break;
 
 	case 3: //write CV
 		switch (PRG_level) {
 		case 2: //parameter
 			prg_typecv--;
-			if (prg_typecv > 3) prg_typecv = 3; //instellen dcc accessoire 2 loc1 en loc2		
+			if (prg_typecv > 2) prg_typecv = 2; //CV keuzes loc1 loc2 Decoder		
 			break;
 		case 3: //CV
 			PRG_cvs[0]--;
@@ -538,7 +529,6 @@ void PRG_inc() {
 			//break;
 		}
 		break;
-
 	case 1: //Testen
 		switch (PRG_level) {
 		case 2: //loc, wissels of seinen kiezen
@@ -567,14 +557,14 @@ void PRG_inc() {
 		break;
 	case 2: //write DCC
 		prg_typecv++;
-		if (prg_typecv > 3) prg_typecv = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
+		if (prg_typecv > 1) prg_typecv = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
 		//GPIOR0 ^= (1 << 7);
 		break;
 	case 3: //write CV
 		switch (PRG_level) {
-		case 2:
+		case 2: //
 			prg_typecv++;
-			if (prg_typecv > 3) prg_typecv = 0; //keuze locs, wissels, seinen	
+			if (prg_typecv > 2) prg_typecv = 0; 
 			break;
 		case 3:
 			PRG_cvs[0]++;
@@ -582,12 +572,10 @@ void PRG_inc() {
 			break;
 		case 4://Value
 			PRG_cvs[1]++;
-			//if (PRG_cvs[1] == 0) PRG_cvs[1] = 1;
 			break;
 		}
 		break;
 	}
-	//DSP_prg();
 }
 void DCC_command() {
 	byte loc = 0;
@@ -774,23 +762,23 @@ void SW_PRG(byte sw) {
 						DCC_acc(0, 1, prg_wissels, (pos_wissels & (1 << prg_wissels)));
 					}
 					break;
-				case 3: //seinen lvl3, omzetten sein decoders gebleven	
+				case 3: //seinen lvl3, omzetten sein decoders 	
 					GPIOR1 &= ~(1 << 6);
 
-					if (prg_sein < 8){						
+					if (prg_sein < 8) {
 						pos_seinen[0] ^= (1 << prg_sein);
 						if (pos_seinen[0] & (1 << prg_sein))GPIOR1 |= (1 << 6);
 					}
 					else {
 						pos_seinen[1] ^= (1 << (prg_sein - 8));
-						if (pos_seinen[1] & (1 << prg_sein -8))GPIOR1 |= (1 << 6);
+						if (pos_seinen[1] & (1 << prg_sein - 8))GPIOR1 |= (1 << 6);
 					}
-					Serial.print(pos_seinen[0], BIN); Serial.print("  ");
-					Serial.println(pos_seinen[1], BIN);
-					Serial.print("poort: "); Serial.println(bitRead(GPIOR1,6));
+					//Serial.print(pos_seinen[0], BIN); Serial.print("  ");
+					//Serial.println(pos_seinen[1], BIN);
+					//Serial.print("poort: "); Serial.println(bitRead(GPIOR1,6));
 
-					//DCC_acc(true, true, prg_sein, GPIOR1 & (1 << 6));
-					//hier nog de verzending van dcc commando
+					DCC_acc(true, true, prg_sein, GPIOR1 & (1 << 6));
+
 					break;
 				case 4://melders
 					break;
@@ -952,7 +940,7 @@ void DSP_prg() {
 			buttons = 10;
 			break;
 
-		case 2: //Write adres in loc and accessoires
+		case 2: //Write adres in loc and accessoires gebleven
 			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
 			switch (prg_typecv) {
 			case 0:
@@ -964,9 +952,8 @@ void DSP_prg() {
 			}
 			buttons = 10;
 			break;
-		case 3: //CV programming
+		case 3: //CV programming gebleven
 			cd; regel1s; TXT(10); TXT(5); regel2;
-
 			switch (prg_typecv) {
 			case 0: //loc1
 				TXT(2); TXT(101);
@@ -974,18 +961,14 @@ void DSP_prg() {
 			case 1: //loc2
 				TXT(2); TXT(102);
 				break;
-			case 2://wissels
-				TXT(8);
-				break;
-			case 3: //Seinen
-				TXT(9);
+			case 2://Decoders
+				TXT(6);
 				break;
 			}
 			buttons = 10;
 			break;
 		}
 		break;
-
 		//**********************************level 3
 	case 3: // level 3
 		switch (PRG_fase) {
@@ -1064,10 +1047,9 @@ void DSP_prg() {
 				}
 				buttons = 12;
 				break;
-			case 3: //Test seinen (lvl3) gebleven
-				
+			case 3: //Test seinen (lvl3) 
 				TXT(9); //Testen Seinen		
-				regel2; TXT(15); display.println(prg_sein+1);
+				regel2; TXT(15); display.println(prg_sein + 1);
 				position = 32;
 
 				if (prg_sein < 8) {
@@ -1106,7 +1088,6 @@ void DSP_prg() {
 		buttons = 10;
 		break;
 	}
-
 	//display.fillRect(0, 50, 128, 64, BLACK);
 	DSP_buttons(buttons);
 	display.display();
@@ -1121,7 +1102,7 @@ void TXT_cv3() {
 		TXT(2); TXT(102);
 		break;
 	case 2:
-		TXT(3);
+		TXT(6);
 		break;
 	}
 	regel2; TXT(5); display.print(PRG_cvs[0]);
@@ -1176,7 +1157,7 @@ void TXT(byte t) {
 		display.print("CV ");
 		break;
 	case 6:
-		display.print("Niet in gebruik");
+		display.print("Decoders");
 		break;
 	case 7:
 		display.print("Instellen ");
