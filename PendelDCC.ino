@@ -301,12 +301,27 @@ void DCC_endwrite() {
 	DSP_prg();
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
+	//gebleven
 	byte da;	//ws=wissel of sein
 	//num is welk volgnummer
 	//maakt commandoos voor accessoires, wissels, seinen
 	//poort true is afbuigend
 	if (ws) { //true seinen
 		da = dcc_seinen;
+		Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
+		Serial.print("adres: "); Serial.print(da); Serial.print("  ");
+		Serial.print("Poort: "); Serial.println(poort);
+		Serial.println("*********");
+		while (channel > 3) {
+			da++;
+			channel = channel - 4;
+		}
+		Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
+		Serial.print("adres: "); Serial.print(da); Serial.print("  ");
+		Serial.print("Poort: "); Serial.println(poort);
+		Serial.println("");
+
+
 		//hier nog iets met adres ophoging bij de volgende decoder 
 	}
 	else { //wissels
@@ -579,7 +594,7 @@ void DCC_command() {
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
 		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
-		Serial.println("send");
+		//Serial.println("send");
 	}
 	else { //send loc data
 		if (GPIOR1 & (1 << 2))loc = 1; //else loc=0
@@ -759,19 +774,22 @@ void SW_PRG(byte sw) {
 						DCC_acc(0, 1, prg_wissels, (pos_wissels & (1 << prg_wissels)));
 					}
 					break;
-				case 3: //seinen lvl3, omzetten sein decoders
-					temp = prg_sein >> 1;
-					GPIOR1 &= ~(1 << 7); //clear flag
-					if (prg_sein & (1 << 0))GPIOR1 |= (1 << 7); // temp boolean
-					if (GPIOR1 & (1 << 7)) {
-						pos_seinen[0] ^= (1 << temp);
+				case 3: //seinen lvl3, omzetten sein decoders gebleven	
+					GPIOR1 &= ~(1 << 6);
+
+					if (prg_sein < 8){						
+						pos_seinen[0] ^= (1 << prg_sein);
+						if (pos_seinen[0] & (1 << prg_sein))GPIOR1 |= (1 << 6);
 					}
 					else {
-						pos_seinen[1] ^= (1 << temp);
+						pos_seinen[1] ^= (1 << (prg_sein - 8));
+						if (pos_seinen[1] & (1 << prg_sein -8))GPIOR1 |= (1 << 6);
 					}
 					Serial.print(pos_seinen[0], BIN); Serial.print("  ");
 					Serial.println(pos_seinen[1], BIN);
+					Serial.print("poort: "); Serial.println(bitRead(GPIOR1,6));
 
+					//DCC_acc(true, true, prg_sein, GPIOR1 & (1 << 6));
 					//hier nog de verzending van dcc commando
 					break;
 				case 4://melders
@@ -1046,25 +1064,23 @@ void DSP_prg() {
 				}
 				buttons = 12;
 				break;
-			case 3: //Test seinen (lvl3)
-				display.drawRect(88, 0, 27, 45, WHITE);
-				//temp = prg_sein;
-				TXT(9); //Testen Seinen
-				regel2; TXT(15);
-				temp = (prg_sein >> 1);
-				display.print(temp + 1); TXT(32);
+			case 3: //Test seinen (lvl3) gebleven
+				
+				TXT(9); //Testen Seinen		
+				regel2; TXT(15); display.println(prg_sein+1);
 				position = 32;
-				if (prg_sein & (1 << 0)) {
-					TXT(102);
-					if (pos_seinen[0] & (1 << temp))position = 12;
+
+				if (prg_sein < 8) {
+					if (pos_seinen[0] & (1 << prg_sein))position = 12;
 				}
 				else {
-					TXT(101);
-					if (pos_seinen[1] & (1 << temp))position = 12;
+					if (pos_seinen[1] & (1 << prg_sein - 8))position = 12;
 				}
-				display.fillCircle(101, position, 8, WHITE);
-				buttons = 13;
+				display.drawRect(88, 0, 27, 45, WHITE);
+				display.fillCircle(101, position, 6, WHITE);
+				buttons = 12;
 				break;
+
 			case 4: //Test melders (lvl3)
 				TXT(3);
 				break;
@@ -1091,6 +1107,7 @@ void DSP_prg() {
 		break;
 	}
 
+	//display.fillRect(0, 50, 128, 64, BLACK);
 	DSP_buttons(buttons);
 	display.display();
 }
