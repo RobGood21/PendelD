@@ -62,6 +62,8 @@ byte dcc_wissels; //dcc basis adres wissel decoder
 byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
 byte pos_seinen[2]; //stand positie van de seinen
+byte pos_melders[2]; //stand van de melders
+byte pos_melderDir[2]; // richting van de melders hoog/laag actief
 
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
@@ -88,17 +90,14 @@ void setup() {
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
 
-	DDRD &= 0x00;
-	PORTD = 0xFF; //port D as inputs with pull ups 
+	DDRD |= (1 << 3); //pin3 as output
+	PORTD |= (B11110000 << 0); //Pull up to pin 7,6,5,4
 
 	DDRB |= (1 << 0); //PIN8 as output enable DCC
 
 	PORTB |= (1 << 1); //puuup to pin 9
-
-
 	sw_statusC = 0xFF;
 	sw_statusD = 0xFF;
-
 	//interrupt register settings
 	//TCCR2A – Timer/Counter Control Register A
 	TCCR2A = 0x00; //clear register
@@ -106,35 +105,9 @@ void setup() {
 	TCCR2A |= (1 << 1); //CTC mode clear timer at compare match
 	TCCR2B = 2; //set register timer 2 prescaler 8
 	TIMSK2 |= (1 << 1);
-
 	PORTB |= (1 << 0); //set pin8 high
 	functies = B10000000;
-	//DCC_command();
-	//delay(1000);
 	DSP_start();
-	//******display start
-
-	//display.clearDisplay();
-	//display.setTextSize(1);
-	//display.setTextColor(WHITE);
-	//display.setCursor(10, 10);
-	//display.println("www.wisselmotor.nl");
-	//display.display();
-
-	//Use the drawLine(x1, y1, x2, y2, color) method to create a line.The(x1, y1) coordinates 
-	//indicate the start of the line, and the(x2, y2) coordinates indicates where the line ends.
-
-	//delay(1000);
-	//display.drawLine(10, 20, 115, 20, WHITE);
-	//display.display();
-	//delay(1000);
-	//The drawRect(x, y, width, height, color) provides an easy way to draw a rectangle.
-	//The(x, y) coordinates indicate the top left corner of the rectangle.Then, 
-	//you need to specify the width, height and color:
-	//display.drawRect(5, 25, 100, 20, WHITE);
-	//display.display();
-	//***display end
-
 	MEM_read();
 	GPIOR0 = B10000000; //set start conditions
 	loc_function[0] = 128;
@@ -143,14 +116,12 @@ void setup() {
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
 	//if (bitRead(GPIOR0, 0) == false) { //full bit
-
 	if (~GPIOR0 & (1 << 0)) {
 		//bepaal volgende bit
 		switch (dcc_fase) {
 		case 0: //niks doen alleen 1 bits zenden 	
 			TrueBit;
 			break;
-
 		case 1: //preample zenden
 			count_preample++;
 			if (count_preample > 22) {
@@ -204,11 +175,13 @@ void MEM_read() {
 		dcc_wissels = 1; //default =1
 		EEPROM.update(102, dcc_wissels);
 	}
-	dcc_seinen = EEPROM.read(103); //heeft 8 dcc kanalen(16 leds)
+	dcc_seinen = EEPROM.read(103); //heeft 16 dcc kanalen)
 	if (dcc_seinen == 0xFF) {
 		dcc_seinen = 252;
 		EEPROM.update(103, dcc_seinen);
 	}
+	pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
+	pos_melderDir[1] = EEPROM.read(105);
 	//default=0xFF 255
 
 }
@@ -605,8 +578,8 @@ void DCC_command() {
 void SW_exe() {
 	byte poort; byte changed;
 	GPIOR0 ^= (1 << 4);
-	if (GPIOR0 & (1 << 4)) {
-
+	if (GPIOR0 & (1 << 4)) { 
+		//DCC enabled switch lezen
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
 			if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
 			if (PINB & (1 << 1)) {
@@ -616,8 +589,18 @@ void SW_exe() {
 				GPIOR1 &= ~(1 << 3);
 			}
 		}
+		//Melders op poort B (pin 4~7) lezen bezig
+		PIND |= (1 << 3);
+		poort = PIND>>4; //isolate 1 nibble
+		changed = poort ^ pos_melders[PIND & (1<< 3)];
+		if (changed > 0) {
+			Serial.println(changed, BIN);
+			//md_exe(i, 0);
+		}
+		pos_melders[PIND & (1<<3)] = poort;
+		//pos_melders |= (1 << 1);
 	}
-	else {
+	else { //switches on poort C lezen
 		poort = PINC;
 		changed = poort ^ sw_statusC;
 		for (byte i = 0; i < 4; i++) {
@@ -627,6 +610,9 @@ void SW_exe() {
 		}
 		sw_statusC = poort;
 	}
+}
+void MD_exe(byte md,boolean onoff) {
+	Serial.print("Melder: "); Serial.print(md); Serial.print(" "); Serial.println(onoff);
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {

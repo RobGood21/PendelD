@@ -49,6 +49,7 @@ bit0 Write adres to loc true, false normal operation
 bit1 blocks DSP updates
 bit2 DCC send loc1 true or loc2 false
 bit3 switch status pin 9 (portB bit1)
+bit4 
 
 
 bit6 algemeen boolean binnen een void		
