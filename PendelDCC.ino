@@ -592,13 +592,18 @@ void SW_exe() {
 		//Melders op poort B (pin 4~7) lezen bezig
 		PIND |= (1 << 3);
 		poort = PIND>>4; //isolate 1 nibble
-		changed = poort ^ pos_melders[PIND & (1<< 3)];
-		if (changed > 0) {
-			Serial.println(changed, BIN);
-			//md_exe(i, 0);
+		changed = poort ^ pos_melders[PIND & (1 << 3)];
+		for (byte i = 0; i < 4; i++) {
+			if (changed & (1 << i)) {
+				if (PIND & (1 << 3)) {
+					MD_exe(i, poort & (1 << i));
+				}
+				else {
+					MD_exe(i+4, poort & (1 << i));
+				}				
+			}				
 		}
 		pos_melders[PIND & (1<<3)] = poort;
-		//pos_melders |= (1 << 1);
 	}
 	else { //switches on poort C lezen
 		poort = PINC;
