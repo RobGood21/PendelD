@@ -45,6 +45,7 @@ byte count_cv;
 byte count_repeat;
 int count_slow;
 byte count_wa; //write adres
+byte count_sw;
 
 byte dcc_fase;
 byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
@@ -63,7 +64,7 @@ byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
 byte pos_seinen[2]; //stand positie van de seinen
 byte pos_melders[2]; //stand van de melders
-byte pos_melderDir[2]; // richting van de melders hoog/laag actief
+//byte pos_melderDir[2]; // richting van de melders hoog/laag actief
 
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
@@ -90,6 +91,7 @@ void setup() {
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
 
+	DDRD = 0x00;
 	DDRD |= (1 << 3); //pin3 as output
 	PORTD |= (B11110000 << 0); //Pull up to pin 7,6,5,4
 
@@ -112,6 +114,7 @@ void setup() {
 	GPIOR0 = B10000000; //set start conditions
 	loc_function[0] = 128;
 	loc_function[1] = 128;
+	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 }
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
@@ -180,8 +183,8 @@ void MEM_read() {
 		dcc_seinen = 252;
 		EEPROM.update(103, dcc_seinen);
 	}
-	pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
-	pos_melderDir[1] = EEPROM.read(105);
+	//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
+	//pos_melderDir[1] = EEPROM.read(105);
 	//default=0xFF 255
 
 }
@@ -537,7 +540,7 @@ void PRG_inc() {
 		switch (PRG_level) {
 		case 2: //
 			prg_typecv++;
-			if (prg_typecv > 2) prg_typecv = 0; 
+			if (prg_typecv > 2) prg_typecv = 0;
 			break;
 		case 3:
 			PRG_cvs[0]++;
@@ -576,48 +579,71 @@ void DCC_command() {
 	}
 }
 void SW_exe() {
-	byte poort; byte changed;
-	GPIOR0 ^= (1 << 4);
-	if (GPIOR0 & (1 << 4)) { 
-		//DCC enabled switch lezen
-		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
-			if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
-			if (PINB & (1 << 1)) {
-				GPIOR1 |= (1 << 3);
-			}
-			else {
-				GPIOR1 &= ~(1 << 3);
-			}
-		}
-		//Melders op poort B (pin 4~7) lezen bezig
-		PIND |= (1 << 3);
-		poort = PIND>>4; //isolate 1 nibble
-		changed = poort ^ pos_melders[PIND & (1 << 3)];
-		for (byte i = 0; i < 4; i++) {
-			if (changed & (1 << i)) {
-				if (PIND & (1 << 3)) {
-					MD_exe(i, poort & (1 << i));
+	//count_sw ++;
+	//if (count_sw == 0) {
+
+
+
+		byte poort; byte changed; byte temp;
+		GPIOR0 ^= (1 << 4);
+		if (GPIOR0 & (1 << 4)) {
+			//DCC enabled switch lezen
+			if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
+				if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
+				if (PINB & (1 << 1)) {
+					GPIOR1 |= (1 << 3);
 				}
 				else {
-					MD_exe(i+4, poort & (1 << i));
-				}				
-			}				
-		}
-		pos_melders[PIND & (1<<3)] = poort;
-	}
-	else { //switches on poort C lezen
-		poort = PINC;
-		changed = poort ^ sw_statusC;
-		for (byte i = 0; i < 4; i++) {
-			if (changed & (1 << i) & ~poort & (1 << i)) {
-				SW_on(i);
+					GPIOR1 &= ~(1 << 3);
+				}
+			}
+			//Melders op poort B (pin 4~7) lezen bezig
+			PIND |= (1 << 3); //toggle pin 3
+			//if (PIND & (1 << 3))temp = 1;
+			poort = PIND;
+			poort = poort >> 4; //isolate 1 nibble
+			changed = poort ^ pos_melders[bitRead(PIND, 3)];
+			//[PIND & (1 << 3)]; kan niet array vraagt een cyfer niet een true or false
+			if (changed > 0) {
+				if (PIND & (1 << 3)) {
+					//Serial.println("Johannes");
+					pos_melders[1] = poort;
+				}
+				else {
+					//Serial.println("Jopië");
+					pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+				}
+				for (byte i = 0; i < 4; i++) {
+					//switched
+					if (changed & (1 << i)) {
+						if (PIND & (1 << 3)) {
+							MD_exe(i, poort & (1 << i));
+						}
+						else {
+							MD_exe(i + 4, poort & (1 << i));
+						}
+					}
+				}
 			}
 		}
-		sw_statusC = poort;
-	}
+		else { //switches on poort C lezen
+			poort = PINC;
+			changed = poort ^ sw_statusC;
+			for (byte i = 0; i < 4; i++) {
+				if (changed & (1 << i) & ~poort & (1 << i)) {
+					SW_on(i);
+				}
+			}
+			sw_statusC = poort;
+		}
+	//}//counter
 }
-void MD_exe(byte md,boolean onoff) {
+void MD_exe(byte md, boolean onoff) {
+	Serial.print("POsmelder0: "); Serial.print(pos_melders[0], BIN);
+	Serial.print(" "); Serial.print("Posmelder1: "); Serial.println(pos_melders[1], BIN);
+
 	Serial.print("Melder: "); Serial.print(md); Serial.print(" "); Serial.println(onoff);
+	if (PRG_fase == 1) DSP_prg();
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
@@ -1054,8 +1080,22 @@ void DSP_prg() {
 				buttons = 12;
 				break;
 
-			case 4: //Test melders (lvl3)
+			case 4: //Test melders (lvl3) bezig
 				TXT(3);
+				//show melders
+				position = 0;
+				temp = 15;
+				for (byte a = 1; a < 2; a--) {
+					for (byte i = 0; i < 4; i++) {
+						if (pos_melders[a] & (1 << i)) {
+							display.drawRect(position + (i * 20), 15 + (a*temp), 12, 12, WHITE);
+						}
+						else {
+							display.fillRect(position + (i * 20), 15 + (a*temp), 12, 12, WHITE);
+						}
+					}
+				}
+				buttons = 13;
 				break;
 			}
 			break;
@@ -1116,6 +1156,9 @@ void DSP_buttons(byte mode) {
 		break;
 	case 12: //testen wissels/seinen
 		TXT(23);
+		break;
+	case 13: //testen melders, alleen sluiten
+		TXT(24);
 		break;
 
 	default:
@@ -1189,6 +1232,13 @@ void TXT(byte t) {
 		break;
 	case 23:
 		display.print(" <    >     []     X");
+		break;
+	case 24:
+		display.print(" -    -      -     X");
+		break;
+
+
+
 		//******************
 	case 30:
 		display.print(" (");
