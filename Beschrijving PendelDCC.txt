@@ -6,7 +6,7 @@ PRG_level, hoe diep CV heeft bv 4 levels, adres loco1 maar 2 Parameter-value-lev
 PB3; PIN 11  is compare match register timer 2 gebruiken voor DCC output PIN
 
 loc_reg
-bit0 direction true forward, false reverse
+bit0 direction true forward, false reverse ..?? nodig is bit 
 
 PINS
 1	melder 1
@@ -42,15 +42,14 @@ bit3	Loc adres programming active
 bit4	Switch reading port C or port D
 bit5	Programmode true, false pendel bedrijf
 bit6	Program parameter false/ value true
-bit7	Active loco false=2; true=1
+bit7	Active loco false=1; true=2 (manual operation)
 
 COM reg 2 GPIOR1
 bit0 Write adres to loc true, false normal operation
 bit1 blocks DSP updates
-bit2 DCC send loc1 true or loc2 false
+bit2 free
 bit3 switch status pin 9 (portB bit1)
 bit4 
-
-
+bit5
 bit6 algemeen boolean binnen een void		
 bit7 algemeen boolean binnen een void, te gebruiken

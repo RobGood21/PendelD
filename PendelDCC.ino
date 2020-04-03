@@ -40,12 +40,24 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 //struct's
 struct LOC
 {
-	byte reg; //register, flags 
+	byte reg; //register, flags  //3april niet in gebruik
+	//bit0 niet in gebruik
 	byte adres; //DCC adres
 	byte speed; //Byte snelhed en richting
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
+	byte route; //welke route is bezet door loc, 0xFF is geen
+	byte function; //functies
 
 }LOC[2];
+
+struct route {
+	byte reg; //registers
+	/*bit0 richting.... ?????   nodig??
+	*/
+	byte Tgoal; //station is GOAL bij richting true, Fgoal=FROM
+	byte Fgoal; //station is GOAL bij richting false, Tgoal=FROM
+
+} ROUTE[8];
 
 
 //count tellers, 
@@ -57,6 +69,7 @@ byte count_repeat;
 int count_slow;
 byte count_wa; //write adres
 byte count_sw;
+byte count_command;
 
 byte dcc_fase;
 byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
@@ -65,7 +78,7 @@ byte sw_statusC; //laatste stand van switches op C port
 byte sw_statusD; //D port
 
 byte loc_ta; //temp loc adres nodig in CV adres programming
-byte loc_function[2]; //moet van EEPROM komen
+//byte loc_function[2]; //moet van EEPROM komen
 
 byte dcc_wissels; //dcc basis adres wissel decoder 
 byte dcc_seinen; //dcc basis adres sein decoder
@@ -85,11 +98,8 @@ byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 
 //temps
-//volatile unsigned long time;
-//volatile unsigned long countpuls;
-//unsigned long time_slow;
-//byte functies;
-//byte newlocadres = 10;
+byte tempcount;
+
 
 void setup() {
 	Serial.begin(9600);
@@ -117,16 +127,20 @@ void setup() {
 	TIMSK2 |= (1 << 1);
 	PORTB |= (1 << 0); //set pin8 high
 	//functies = B10000000;
-	DSP_start();
+	//DSP_start();
 	MEM_read();
-	GPIOR0 = B10000000; //set start conditions
-	loc_function[0] = 128;
-	loc_function[1] = 128;
+
+	//init
+	LOC[0].speed = B01100000;
+	LOC[1].speed = B01100000;
+
+	LOC[0].function = 128;
+	LOC[1].function = 128;
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
+	DSP_pendel();
 }
 ISR(TIMER2_COMPA_vect) {
 	GPIOR0 ^= (1 << 0);
-	//if (bitRead(GPIOR0, 0) == false) { //full bit
 	if (~GPIOR0 & (1 << 0)) {
 		//bepaal volgende bit
 		switch (dcc_fase) {
@@ -216,19 +230,8 @@ void MEM_update() { //sets new values/ sends CV
 		}
 		break;
 		//****************************PROGRAM fase 2
-
 	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
 
-		/*kan sneller? niet zeker of 0 of 1 exclusief is ... 2apr2020 scheelt 10bytes program
-		switch (prg_typecv) {
-		case 0: //loco 1
-			loc_ta= LOC[0].adres;
-			break;
-		case 1: //loco 2
-			loc_ta= LOC[1].adres;
-			break;
-		}
-		dan dus: */ 
 		loc_ta = LOC[prg_typecv].adres;
 
 
@@ -276,7 +279,7 @@ void DCC_write() {
 			DCC_endwrite();
 		}
 		else {
-			DCC_cv(true, count_wa, 1,loc_ta); //loc_ta =loc tijdelijk adres
+			DCC_cv(true, count_wa, 1, loc_ta); //loc_ta =loc tijdelijk adres
 			display.drawPixel(count_wa, 40, WHITE);
 			display.drawPixel(count_wa, 41, WHITE);
 			display.display();
@@ -341,20 +344,20 @@ void DCC_accAdres(byte da) {
 	dcc_data[0] = da; dcc_data[0] |= (1 << 7);
 }
 void LOC_calc(byte loc) {
+	//Serial.println(LOC[loc].speed, BIN);
 	byte speed;
 	if (LOC[loc].velo & (1 << 0)) { //oneven
 		speed = LOC[loc].velo / 2 + 2;
 	}
-	else { //even
-
+	else { //even/
 		speed = LOC[loc].velo / 2 + 1;
 		speed |= (1 << 4);
 	}
-	//richting loco
-	speed |= (1 << 6);
-	if (LOC[loc].reg & (1 << 0))speed |= (1 << 5);
-	LOC[loc].speed = speed;
+	LOC[loc].speed &= ~(B00011111 << 0); //clear bit 0~4
+	LOC[loc].speed = LOC[loc].speed + speed;
 
+	//Serial.println(loc);
+	//Serial.println(LOC[loc].speed, BIN);
 }
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
@@ -367,7 +370,6 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 	//old adres alleen bij first zetten van 
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
-
 	if (type) { //locomotive
 		dcc_data[0] = adres;
 		dcc_data[1] = B11101100; //instruction write CV
@@ -378,7 +380,7 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		count_repeat = 4;
 	}
 	else { //accessoire
-		Serial.println("CV sturen accessoire");
+		//Serial.println("CV sturen accessoire");
 
 		DCC_accAdres(adres); //fills byte 0 and byte 1
 		dcc_data[1] &= ~(15 << 0); //clear bits 0~3
@@ -569,25 +571,34 @@ void DCC_command() {
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
 		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
-		//Serial.println("send");
 	}
 	else { //send loc data
-		if (GPIOR1 & (1 << 2))loc = 1; //else loc=0
-
-		GPIOR0 ^= (1 << 0);
-		if (GPIOR0 & (1 << 0)) { //drive
-			dcc_data[0] = LOC[loc].adres;
-			dcc_data[1] = LOC[loc].speed;
-			dcc_aantalBytes = 2;
+		count_command++;
+		if (count_command > 3)count_command = 0;
+		switch (count_command) {
+		case 0: //loc1 drive
+			dcc_data[0] = LOC[0].adres;
+			dcc_data[1] = LOC[0].speed;
+			break;
+		case 1:
+			dcc_data[0] = LOC[1].adres;
+			dcc_data[1] = LOC[1].speed;
+			break;
+		case 2:
+			dcc_data[0] = LOC[0].adres;
+			dcc_data[1] = LOC[0].function;
+			break;
+		case 3:
+			dcc_data[0] = LOC[1].adres;
+			dcc_data[1] = LOC[1].function;
+			break;
 		}
-		else { //function
-			dcc_data[0] = LOC[loc].adres;
-			dcc_data[1] = loc_function[loc];
-			dcc_aantalBytes = 2;
-			GPIOR1 ^= (1 << 2); //toggle locs
-		}
+		dcc_aantalBytes = 2;
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
+	//Serial.print("Send: "); Serial.print(dcc_data[0], BIN); Serial.print("- "); Serial.println(dcc_data[1], BIN);
+	//Serial.println(dcc_data[0],BIN);
+//}//tempcount
 }
 void SW_exe() {
 	byte poort; byte changed; byte temp;
@@ -602,37 +613,37 @@ void SW_exe() {
 			else {
 				GPIOR1 &= ~(1 << 3);
 			}
-		}	
-			//Melders op poort B (pin 4~7) lezen bezig
-			PIND |= (1 << 3); //toggle pin 3
-			//if (PIND & (1 << 3))temp = 1;
-			poort = PIND;
-			poort = poort >> 4; //isolate 1 nibble
-			changed = poort ^ pos_melders[bitRead(PIND, 3)];
-			//[PIND & (1 << 3)]; kan niet array vraagt een cyfer niet een true or false
-			if (changed > 0) {
-				if (PIND & (1 << 3)) {
-					pos_melders[1] = poort;
-				}
-				else {
-					pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
-				}
-				/*
-				for (byte i = 0; i < 4; i++) {
-				switched, beter md_exe niet gebruiken
-				if (changed & (1 << i)) {
-				if (PIND & (1 << 3)) {
-				MD_exe(i, poort & (1 << i));
-				}
-				else {
-				MD_exe(i + 4, poort & (1 << i));
-				}
-				}
-				}
-				*/
-				if (PRG_fase==1 & PRG_level==3)DSP_prg();
+		}
+		//Melders op poort B (pin 4~7) lezen bezig
+		PIND |= (1 << 3); //toggle pin 3
+		//if (PIND & (1 << 3))temp = 1;
+		poort = PIND;
+		poort = poort >> 4; //isolate 1 nibble
+		changed = poort ^ pos_melders[bitRead(PIND, 3)];
+		//[PIND & (1 << 3)]; kan niet array vraagt een cyfer niet een true or false
+		if (changed > 0) {
+			if (PIND & (1 << 3)) {
+				pos_melders[1] = poort;
 			}
-		
+			else {
+				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+			}
+			/*
+			for (byte i = 0; i < 4; i++) {
+			switched, beter md_exe niet gebruiken
+			if (changed & (1 << i)) {
+			if (PIND & (1 << 3)) {
+			MD_exe(i, poort & (1 << i));
+			}
+			else {
+			MD_exe(i + 4, poort & (1 << i));
+			}
+			}
+			}
+			*/
+			if (PRG_fase == 1 & PRG_level == 3)DSP_prg();
+		}
+
 
 	}
 	else { //switches on poort C lezen
@@ -667,15 +678,16 @@ void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 		PRG_level = 1;
 		DSP_prg();
 		//all stop
-		LOC[0].speed = B01100000; //stop
-		LOC[1].speed = B01100000; //stop
-		//loc_function[0] = 128;
-		//loc_function[0] = 128;
+		LOC[0].speed &= ~(B00011111 << 0); //stop niks doen met richting
+		LOC[1].speed &= ~(B00011111 << 0); //stop
+		//LOC[0].function = 128;
+		//LOC[1].function = 128;
 	}
 	else {
 		GPIOR0 &= ~(1 << 5); //pendel mode
 		PRG_level = 0;
-		DSP_start();
+		//DSP_start();
+		DSP_pendel();
 	}
 }
 void SW_on(byte sw) {
@@ -720,7 +732,8 @@ void SW_PRG(byte sw) {
 		case 3:
 			GPIOR0 &= ~(1 << 5); //Pendel mode
 			PRG_level = 0;
-			DSP_start();
+			//DSP_start();
+			DSP_pendel();
 			return;
 			break;
 		}
@@ -777,15 +790,13 @@ void SW_PRG(byte sw) {
 				MEM_update();
 				break;
 
-			case 1: //Testen
+			case 1: //Testen, knop 2(3e)
 				switch (PRG_typeTest) {
 				case 0: //loc 1
-					LOC[0].reg ^= (1 << 0);
-					LOC_calc(0)	;
+					LOC[0].speed ^= (1 << 5); //toggle direction	
 					break;
 				case 1: //loc 2
-					LOC[1].reg ^= (1 << 0);
-					LOC_calc(1);
+					LOC[1].speed ^= (1 << 5);
 					break;
 				case 2: //wissels
 					if (GPIOR0 & ~(1 << 2)) {
@@ -868,22 +879,24 @@ void SW_pendel(byte sw) { //nieuw
 	//Serial.println(sw);
 	switch (sw) {
 	case 0:
-		LOC[0].speed = B01101110; //drive	
+		GPIOR0 ^= (1 << 7);
+		//LOC[0].speed = B01101110; //drive	
 		break;
 	case 1:
 		LOC[0].speed = B01100000; //stop
 		break;
 	case 2:
-		loc_function[0] ^= (1 << 4); //headlights
+		LOC[0].function ^= (1 << 4); //headlights
 		break;
 	case 3:
 		//PRG_cv(10,1,6);
 		//
 		//display.clearDisplay();
 		//DSP_buttons(0);
-		loc_function[0] ^= (1 << 1); //cabin
+		LOC[0].function ^= (1 << 1); //cabin
 		break;
 	}
+	DSP_pendel();
 }
 void DSP_start() {
 	display.clearDisplay();
@@ -897,6 +910,22 @@ void DSP_start() {
 	display.print("PenDel DCC");
 	DSP_buttons(0);
 	//display.display();
+}
+void DSP_pendel() {
+	byte temp = 0;
+	if (GPIOR0 & (1 << 7))temp = 1;
+	cd;
+	regel1; TXT(2);
+	TXT(101 + temp);
+	if (LOC[temp].speed & (1 << 5)) {
+		TXT(13);
+	}
+	else {
+		TXT(14);
+	}
+	display.print(LOC[temp].velo);
+
+	DSP_buttons(1);
 }
 void DSP_prg() {
 	int adrs;
@@ -1043,7 +1072,7 @@ void DSP_prg() {
 			case 0:  //snelheid en richting loco1
 				TXT(2); TXT(101);
 				regel2;
-				if (LOC[0].reg & (1 << 0)) {
+				if (LOC[0].speed & (1 << 5)) {
 					TXT(13);
 				}
 				else {
@@ -1056,7 +1085,7 @@ void DSP_prg() {
 			case 1: //Loco 2
 				TXT(2); TXT(102);
 				regel2;
-				if (LOC[1].reg & (1 << 0)) {
+				if (LOC[1].speed & (1 << 5)) {
 					TXT(13);
 				}
 				else {
@@ -1155,7 +1184,7 @@ void TXT_cv3() {
 	regel2; TXT(5); display.print(PRG_cvs[0]);
 }
 void DSP_buttons(byte mode) {
-	Serial.println("buttons");
+	//Serial.println("buttons");
 	//sets mode in display
 	display.fillRect(0, 50, 128, 64, BLACK); //schoont het onderste stukje display, 
 //seinen veroorzaakt een storing daar, misschien nog eens naar kijken waar het vandaan komt.
@@ -1167,6 +1196,9 @@ void DSP_buttons(byte mode) {
 	switch (mode) {
 	case 0:
 		TXT(20);
+		break;
+	case 1: //Pendel, start LOC # S R
+		TXT(25);
 		break;
 	case 10: //standaard programmeer balk
 		TXT(21);
@@ -1200,7 +1232,7 @@ void TXT(byte t) {
 		display.print("DCC adres ");
 		break;
 	case 2:
-		display.print("Loco ");
+		display.print("Loc ");
 		break;
 	case 3:
 		display.print("Melders ");
@@ -1233,17 +1265,17 @@ void TXT(byte t) {
 		display.print("DCC ");
 		break;
 	case 13:
-		display.print("<<< ");
+		display.print("< ");
 		break;
 	case 14:
-		display.print(">>> ");
+		display.print("> ");
 		break;
 	case 15:
 		display.print("S ");
 		break;
 		//***********Onderbalken
 	case 20:
-		display.print("Start  loco   FL  F1");
+		display.print("Start  loco   FL  F1"); //in gebruik??
 		break;
 	case 21:
 		display.print(" -     +     V     X");
@@ -1256,6 +1288,9 @@ void TXT(byte t) {
 		break;
 	case 24:
 		display.print(" -    -      -     X");
+		break;
+	case 25:
+		display.print("loc   start  ?  meer");
 		break;
 
 		//******************
