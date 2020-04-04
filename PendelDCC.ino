@@ -47,6 +47,7 @@ struct LOC
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
 	byte route; //welke route is bezet door loc, 0xFF is geen
 	byte function; //functies
+	byte station; //welk station staat loc, 0 is nog niet bepaald.
 
 }LOC[2];
 
@@ -86,7 +87,7 @@ byte pos_wissels; //stand positie van de vier wissels
 byte pos_seinen[2]; //stand positie van de seinen
 byte pos_melders[2]; //stand van de melders
 //byte pos_melderDir[2]; // richting van de melders hoog/laag actief
-
+//program mode
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
 byte PRG_typeDCC; //actieve adres
@@ -94,8 +95,11 @@ byte PRG_typeTest; //actieve test
 byte prg_wissels; //actieve wissel
 byte prg_sein; //actief sein 16x
 byte prg_typecv; //ingestelde waarde op PRG_level 2
-
 byte PRG_cvs[2]; //0=CV 1=waarde
+//Pendel mode
+byte PDL_fase;
+
+
 
 //temps
 byte tempcount;
@@ -683,10 +687,11 @@ void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 		//LOC[0].function = 128;
 		//LOC[1].function = 128;
 	}
-	else {
+	else { //leave program mode 
 		GPIOR0 &= ~(1 << 5); //pendel mode
 		PRG_level = 0;
 		//DSP_start();
+		PDL_fase = 0;
 		DSP_pendel();
 	}
 }
@@ -732,7 +737,7 @@ void SW_PRG(byte sw) {
 		case 3:
 			GPIOR0 &= ~(1 << 5); //Pendel mode
 			PRG_level = 0;
-			//DSP_start();
+			PDL_fase = 0;
 			DSP_pendel();
 			return;
 			break;
@@ -875,27 +880,51 @@ void SW_PRG(byte sw) {
 	//dit bit zorgt dat pas na de bewerking, bv. adres schrijven
 //het display vernieuwd ibv. progressbar bv.
 }
-void SW_pendel(byte sw) { //nieuw
-	//Serial.println(sw);
-	switch (sw) {
+void SW_pendel(byte sw) {
+	byte loc=0;
+	if (GPIOR0 & (1 << 7))loc = 1;
+	switch (PDL_fase) {
 	case 0:
-		GPIOR0 ^= (1 << 7);
-		//LOC[0].speed = B01101110; //drive	
+		switch (sw) {
+		case 0:
+			GPIOR0 ^= (1 << 7);
+			//LOC[0].speed = B01101110; //drive	
+			break;
+		case 1:
+			LOC[0].speed = B01100000; //stop
+			break;
+		case 2:
+			//LOC[0].function ^= (1 << 4); //headlights
+			break;
+		case 3:
+			PDL_fase++; //level hoger
+			//if (PDL_fase > 3)PDL_fase = 0;
+			//PRG_cv(10,1,6);
+			//
+			//display.clearDisplay();
+			//DSP_buttons(0);
+			//LOC[0].function ^= (1 << 1); //cabin
+			break;
+		}
 		break;
-	case 1:
-		LOC[0].speed = B01100000; //stop
-		break;
-	case 2:
-		LOC[0].function ^= (1 << 4); //headlights
-		break;
-	case 3:
-		//PRG_cv(10,1,6);
-		//
-		//display.clearDisplay();
-		//DSP_buttons(0);
-		LOC[0].function ^= (1 << 1); //cabin
+	case 1: //PDL_fase 1
+		Serial.print(loc);
+		switch (sw) {
+		case 0:
+			LOC[loc].function ^= (1 << 0);
+			break;
+		case 1:
+			LOC[loc].function ^= (1 << 1);
+			break;
+		case 2:
+			LOC[loc].function ^= (1 << 2);
+			break;
+		case 3:
+			break;
+		}
 		break;
 	}
+
 	DSP_pendel();
 }
 void DSP_start() {
@@ -912,20 +941,39 @@ void DSP_start() {
 	//display.display();
 }
 void DSP_pendel() {
-	byte temp = 0;
-	if (GPIOR0 & (1 << 7))temp = 1;
+	byte loc = 0; byte button;
+	if (GPIOR0 & (1 << 7))loc = 1; //loc keuze
 	cd;
-	regel1; TXT(2);
-	TXT(101 + temp);
-	if (LOC[temp].speed & (1 << 5)) {
-		TXT(13);
+	switch (PDL_fase) {
+	case 0:
+		regel1; TXT(2);
+		TXT(101 + loc);
+		if (LOC[loc].speed & (1 << 5)) {
+			TXT(13);
+		}
+		else {
+			TXT(14);
+		}
+		display.print(LOC[loc].velo);
+		display.fillRect(5, 22, 23, 23, WHITE);
+		display.setTextColor(BLACK);
+		display.setCursor(10, 27); display.print(LOC[loc].station);
+		button = 1;
+		break;
+	case 1:
+		regel1s, TXT(2); TXT(101 + loc); TXT(4);
+		for (byte i = 0; i < 3; i++) {
+			if (LOC[loc].function & (1 << i)) { //funcion on
+				display.fillCircle(9 + (i * 34), 29, 9, WHITE);
+			}
+			else { //function off
+				display.drawCircle(9 + (i * 34), 29, 9, WHITE);
+			}
+		}
+		button = 2;
+		break;
 	}
-	else {
-		TXT(14);
-	}
-	display.print(LOC[temp].velo);
-
-	DSP_buttons(1);
+	DSP_buttons(button);
 }
 void DSP_prg() {
 	int adrs;
@@ -1188,7 +1236,7 @@ void DSP_buttons(byte mode) {
 	//sets mode in display
 	display.fillRect(0, 50, 128, 64, BLACK); //schoont het onderste stukje display, 
 //seinen veroorzaakt een storing daar, misschien nog eens naar kijken waar het vandaan komt.
-	//waarschijnlijk de convesrsie van nummer naar txt
+	//waarschijnlijk de conversie van nummer naar txt
 	display.drawRect(0, 50, 128, 14, WHITE);
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
@@ -1197,8 +1245,11 @@ void DSP_buttons(byte mode) {
 	case 0:
 		TXT(20);
 		break;
-	case 1: //Pendel, start LOC # S R
+	case 1: //Pendel, start LOC # S R PDL_fase=0
 		TXT(25);
+		break;
+	case 2: //functies van de loc PDL_fase 1
+		TXT(26);
 		break;
 	case 10: //standaard programmeer balk
 		TXT(21);
@@ -1238,7 +1289,7 @@ void TXT(byte t) {
 		display.print("Melders ");
 		break;
 	case 4:
-		display.print("**** "); //niet in gebruik
+		display.print("functies "); //niet in gebruik
 		break;
 	case 5:
 		display.print("CV ");
@@ -1290,7 +1341,10 @@ void TXT(byte t) {
 		display.print(" -    -      -     X");
 		break;
 	case 25:
-		display.print("loc   start  ?  meer");
+		display.print("loc   start   ?   F");// PDL_fase = 0;
+		break;
+	case 26:
+		display.print("F0    F1    F2    I"); //PDL_fase =1
 		break;
 
 		//******************
@@ -1315,8 +1369,6 @@ void TXT(byte t) {
 	case 103:
 		display.print("3 ");
 		break;
-
-
 	case 200:
 		display.print(" ");
 		break;
