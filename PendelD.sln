@@ -12,7 +12,18 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OledTest", "OledTest\OledTest.vcxproj", "{FBBE4FA1-D141-4883-BA18-BF526E1B9498}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Adafruit_SSD1306-2.1.0", "Libraries\Adafruit_SSD1306\2.1.0\Adafruit_SSD1306\Adafruit_SSD1306-2.1.0.vcxitems", "{C57B50E0-FFCE-44FD-ACC6-7F5A9B2FE144}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Adafruit_GFX_Library-1.7.5", "Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems", "{CCBA43FC-407D-4E97-BA93-671E8AD70B2A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EEPROM-2.0", "Libraries\EEPROM\2.0\EEPROM\EEPROM-2.0.vcxitems", "{88643D2D-E154-45C6-8E96-2FC37BB1DAC9}"
+EndProject
 Global
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		Libraries\EEPROM\2.0\EEPROM\EEPROM-2.0.vcxitems*{88643d2d-e154-45c6-8e96-2fc37bb1dac9}*SharedItemsImports = 9
+		Libraries\Adafruit_SSD1306\2.1.0\Adafruit_SSD1306\Adafruit_SSD1306-2.1.0.vcxitems*{c57b50e0-ffce-44fd-acc6-7f5a9b2fe144}*SharedItemsImports = 9
+		Libraries\Adafruit_GFX_Library\1.7.5\Adafruit_GFX_Library\Adafruit_GFX_Library-1.7.5.vcxitems*{ccba43fc-407d-4e97-ba93-671e8ad70b2a}*SharedItemsImports = 9
+	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
 		Release|x86 = Release|x86

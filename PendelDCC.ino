@@ -1,7 +1,8 @@
 /*
 	Name:       PendelD.ino
 	Created:	2020
-	Author:     Rob Antonisse
+	Author:     Rob Antonisse  
+
 
 	Arduino programma voor een pendelautomaat voor digitale DCC locomotieven
 

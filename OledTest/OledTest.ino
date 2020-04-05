@@ -5,7 +5,7 @@
 
 */
 
-
+#include <EEPROM.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -36,7 +36,7 @@ void setup() {
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
 	display.setCursor(10, 10);
-	display.println("jo");
+	display.println("Deze doet wel wat");
 	
 	//Use the drawLine(x1, y1, x2, y2, color) method to create a line.The(x1, y1) coordinates 
 	//indicate the start of the line, and the(x2, y2) coordinates indicates where the line ends.
