@@ -1,7 +1,7 @@
 /*
 	Name:       PendelD.ino
 	Created:	2020
-	Author:     Rob Antonisse  
+	Author:     Rob Antonisse
 
 
 	Arduino programma voor een pendelautomaat voor digitale DCC locomotieven
@@ -39,17 +39,15 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
 //declarations, 
 //struct's
-struct LOC
-{
-	byte reg; //register, flags  //3april niet in gebruik
-	//bit0 niet in gebruik
+struct LOC {
+	//strucs max 7 bytes anders crashed alles
+	byte Vmax;
+	byte Vmin;
 	byte adres; //DCC adres
 	byte speed; //Byte snelhed en richting
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
-	byte route; //welke route is bezet door loc, 0xFF is geen
 	byte function; //functies
-	byte station; //welk station staat loc, 0 is nog niet bepaald.
-
+	byte station;
 }LOC[2];
 
 struct route {
@@ -58,6 +56,9 @@ struct route {
 	*/
 	byte Tgoal; //station is GOAL bij richting true, Fgoal=FROM
 	byte Fgoal; //station is GOAL bij richting false, Tgoal=FROM
+	byte test;
+	byte test2;
+	byte test3;
 
 } ROUTE[8];
 
@@ -189,17 +190,18 @@ ISR(TIMER2_COMPA_vect) {
 	}
 }
 void MEM_read() {
-	LOC[0].adres = EEPROM.read(100);
-	LOC[1].adres = EEPROM.read(101);
-	if (LOC[0].adres == 0xFF) {
-		LOC[0].adres = 0x03;
-		EEPROM.update(100, LOC[0].adres);
+	for (byte i = 0; i < 2; i++) {
+		LOC[i].adres = EEPROM.read(100+i);
+		if (LOC[i].adres == 0xFF) {
+			LOC[i].adres = 0x03;
+			EEPROM.update(100+i, LOC[i].adres);
+		}
+		//merk op, update van eeprom is eigenlijk nergens voor nodig.
+		LOC[i].Vmin = EEPROM.read(104+i);
+		if (LOC[i].Vmin > 10)LOC[i].Vmin = 1;
+		LOC[i].Vmax = EEPROM.read(106 + i);
+		if (LOC[i].Vmax > 28)LOC[i].Vmax = 28;
 	}
-	if (LOC[1].adres == 0xFF) {
-		LOC[1].adres = 0x04;
-		EEPROM.update(101, LOC[1].adres);
-	}
-
 	dcc_wissels = EEPROM.read(102);
 	if (dcc_wissels == 0xFF) {
 		dcc_wissels = 1; //default =1
@@ -210,15 +212,26 @@ void MEM_read() {
 		dcc_seinen = 252;
 		EEPROM.update(103, dcc_seinen);
 	}
+	//eerste vrij eeprom nu 108
+
+
 	//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
 	//pos_melderDir[1] = EEPROM.read(105);
 	//default=0xFF 255
 
 }
+void MEM_loc_update(byte loc) {
+	//updates loc data 
+	byte number;
+	number = 104 + loc;
+	EEPROM.update(number, LOC[loc].Vmin);	
+	number = 106 + loc;
+	EEPROM.update(106, LOC[loc].Vmax);
+}
+
 void MEM_update() { //sets new values/ sends CV 
 	switch (PRG_fase) {
 	case 0: //DCC adressen
-
 		switch (PRG_typeDCC) {
 		case 0: //loc1
 			EEPROM.update(100, LOC[0].adres);
@@ -234,12 +247,10 @@ void MEM_update() { //sets new values/ sends CV
 			break;
 		}
 		break;
+
 		//****************************PROGRAM fase 2
 	case 2: //prograM CV1 to all 127 adresses new adres GPIOR0 bit7 true loc1,  false loc2
-
 		loc_ta = LOC[prg_typecv].adres;
-
-
 		GPIOR1 |= (1 << 1); //blocks display updates 
 		count_wa = 0;
 		GPIOR1 |= (1 << 0); //enable dcc adress write to loc//DCC_write();			
@@ -882,7 +893,7 @@ void SW_PRG(byte sw) {
 //het display vernieuwd ibv. progressbar bv.
 }
 void SW_pendel(byte sw) {
-	byte loc=0;
+	byte loc = 0;
 	if (GPIOR0 & (1 << 7))loc = 1;
 	switch (PDL_fase) {
 	case 0:
@@ -899,12 +910,6 @@ void SW_pendel(byte sw) {
 			break;
 		case 3:
 			PDL_fase++; //level hoger
-			//if (PDL_fase > 3)PDL_fase = 0;
-			//PRG_cv(10,1,6);
-			//
-			//display.clearDisplay();
-			//DSP_buttons(0);
-			//LOC[0].function ^= (1 << 1); //cabin
 			break;
 		}
 		break;
@@ -912,20 +917,40 @@ void SW_pendel(byte sw) {
 		Serial.print(loc);
 		switch (sw) {
 		case 0:
-			LOC[loc].function ^= (1 << 0);
+			LOC[loc].function ^= (1 << 4);
 			break;
 		case 1:
-			LOC[loc].function ^= (1 << 1);
+			LOC[loc].function ^= (1 << 0);
 			break;
 		case 2:
-			LOC[loc].function ^= (1 << 2);
+			LOC[loc].function ^= (1 << 1);
 			break;
 		case 3:
+			PDL_fase++;
+			break;
+		}
+		break;
+	case 2: //PDL_fase 2, loc instellingen
+		switch (sw) {
+		case 0:
+			LOC[loc].speed ^= (1 << 5);
+			break;
+		case 1:
+			LOC[loc].Vmin++;
+			if (LOC[loc].Vmin > 10)LOC[loc].Vmin = 1;
+			break;
+		case 2:
+			LOC[loc].Vmax--;
+			if (LOC[loc].Vmax < 10)LOC[loc].Vmax = 28;
+			//merk op als eeprom fout wordt gelezen komt er 255 in het vmax
+			break;
+		case 3:
+			PDL_fase = 0;
+			MEM_loc_update(loc);
 			break;
 		}
 		break;
 	}
-
 	DSP_pendel();
 }
 void DSP_start() {
@@ -964,7 +989,9 @@ void DSP_pendel() {
 	case 1:
 		regel1s, TXT(2); TXT(101 + loc); TXT(4);
 		for (byte i = 0; i < 3; i++) {
-			if (LOC[loc].function & (1 << i)) { //funcion on
+			button = i - 1;
+			if (button > 10)button = 4;
+			if (LOC[loc].function & (1 << button)) { //funcion on
 				display.fillCircle(9 + (i * 34), 29, 9, WHITE);
 			}
 			else { //function off
@@ -973,6 +1000,20 @@ void DSP_pendel() {
 		}
 		button = 2;
 		break;
+	case 2:
+		regel1s, TXT(2); TXT(101 + loc); TXT(7); regel2;
+		if (LOC[loc].speed & (1 << 5)) {
+			TXT(13);
+		}
+		else {
+			TXT(14);
+		}
+		display.setCursor(32,23); display.print(LOC[loc].Vmin);
+		display.setCursor(75,23);display.print(LOC[loc].Vmax);
+
+		button = 3;
+		break;
+
 	}
 	DSP_buttons(button);
 }
@@ -1252,6 +1293,9 @@ void DSP_buttons(byte mode) {
 	case 2: //functies van de loc PDL_fase 1
 		TXT(26);
 		break;
+	case 3: //instellingen van de loc, dir, vmax vmin
+		TXT(27);
+		break;
 	case 10: //standaard programmeer balk
 		TXT(21);
 		break;
@@ -1278,7 +1322,7 @@ void DSP_settxt(byte X, byte Y, byte size) {
 void TXT(byte t) {
 	switch (t) {
 	case 0:
-		display.println("");
+		display.println(" ");
 		break;
 	case 1:
 		display.print("DCC adres ");
@@ -1347,6 +1391,9 @@ void TXT(byte t) {
 	case 26:
 		display.print("F0    F1    F2    I"); //PDL_fase =1
 		break;
+	case 27:
+		display.print("<>   Vmin   Vmax   D"); //PDL_fase =1
+		break;
 
 		//******************
 	case 30:
@@ -1369,9 +1416,6 @@ void TXT(byte t) {
 		break;
 	case 103:
 		display.print("3 ");
-		break;
-	case 200:
-		display.print(" ");
 		break;
 	case 255:
 		display.print("niet bepaald");
