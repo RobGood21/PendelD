@@ -9,13 +9,15 @@ loc_reg
 bit0 direction true forward, false reverse ..?? nodig is bit 
 
 PINS
-1	melder 1
-2	melder 2
-3	melder 3
+0
+1	
+2
+3	Melder switch
 4	melder 4
 5	melder 5
 6	melder 6
 7	melder 7
+
 8	DCC data out
 9	DCC on/off switch
 10

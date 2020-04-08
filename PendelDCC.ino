@@ -79,10 +79,8 @@ byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
 byte dcc_aantalBytes; //aantal bytes current van het DCC commando
 byte sw_statusC; //laatste stand van switches op C port
 byte sw_statusD; //D port
-
 byte loc_ta; //temp loc adres nodig in CV adres programming
 //byte loc_function[2]; //moet van EEPROM komen
-
 byte dcc_wissels; //dcc basis adres wissel decoder 
 byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
@@ -100,9 +98,6 @@ byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
 byte PDL_fase;
-
-
-
 //temps
 byte tempcount;
 
@@ -110,17 +105,15 @@ byte tempcount;
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+	//delay(50);
 
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
-
 	DDRD = 0x00;
 	DDRD |= (1 << 3); //pin3 as output
 	PORTD |= (B11110000 << 0); //Pull up to pin 7,6,5,4
-
 	DDRB |= (1 << 0); //PIN8 as output enable DCC
-
 	PORTB |= (1 << 1); //puuup to pin 9
 	sw_statusC = 0xFF;
 	sw_statusD = 0xFF;
@@ -132,20 +125,22 @@ void setup() {
 	TCCR2B = 2; //set register timer 2 prescaler 8
 	TIMSK2 |= (1 << 1);
 	PORTB |= (1 << 0); //set pin8 high
-	//functies = B10000000;
+	 //functies = B10000000;
 	//DSP_start();
 	MEM_read();
-
 	//init
 	LOC[0].speed = B01100000;
 	LOC[1].speed = B01100000;
-
 	LOC[0].function = 128;
 	LOC[1].function = 128;
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	DSP_pendel();
+	//Serial.println("setup, een lange tekst is nu weer geen probleem....");
+
 }
+
 ISR(TIMER2_COMPA_vect) {
+	cli();
 	GPIOR0 ^= (1 << 0);
 	if (~GPIOR0 & (1 << 0)) {
 		//bepaal volgende bit
@@ -188,6 +183,7 @@ ISR(TIMER2_COMPA_vect) {
 			break;
 		}
 	}
+	sei();
 }
 void MEM_read() {
 	for (byte i = 0; i < 2; i++) {
@@ -906,6 +902,7 @@ void SW_pendel(byte sw) {
 			LOC[0].speed = B01100000; //stop
 			break;
 		case 2:
+			//Serial.println("Een lange tekst");
 			//LOC[0].function ^= (1 << 4); //headlights
 			break;
 		case 3:
@@ -914,7 +911,7 @@ void SW_pendel(byte sw) {
 		}
 		break;
 	case 1: //PDL_fase 1
-		Serial.print(loc);
+		//Serial.print(loc);
 		switch (sw) {
 		case 0:
 			LOC[loc].function ^= (1 << 4);
@@ -971,8 +968,8 @@ void DSP_pendel() {
 	if (GPIOR0 & (1 << 7))loc = 1; //loc keuze
 	cd;
 	switch (PDL_fase) {
-	case 0:
-		regel1; TXT(2);
+	case 0:			
+		regel1;TXT(2);		
 		TXT(101 + loc);
 		if (LOC[loc].speed & (1 << 5)) {
 			TXT(13);
@@ -987,7 +984,8 @@ void DSP_pendel() {
 		button = 1;
 		break;
 	case 1:
-		regel1s, TXT(2); TXT(101 + loc); TXT(4);
+		regel1s, TXT(2); //TXT(101 + loc); 
+		TXT(4);
 		for (byte i = 0; i < 3; i++) {
 			button = i - 1;
 			if (button > 10)button = 4;
@@ -1001,7 +999,8 @@ void DSP_pendel() {
 		button = 2;
 		break;
 	case 2:
-		regel1s, TXT(2); TXT(101 + loc); TXT(7); regel2;
+		regel1s, TXT(2); //TXT(101 + loc); 
+		TXT(7); regel2;
 		if (LOC[loc].speed & (1 << 5)) {
 			TXT(13);
 		}
@@ -1013,7 +1012,6 @@ void DSP_pendel() {
 
 		button = 3;
 		break;
-
 	}
 	DSP_buttons(button);
 }
@@ -1322,103 +1320,103 @@ void DSP_settxt(byte X, byte Y, byte size) {
 void TXT(byte t) {
 	switch (t) {
 	case 0:
-		display.println(" ");
+		display.println(F(" "));
 		break;
 	case 1:
-		display.print("DCC adres ");
+		display.print(F("DCC adres "));
 		break;
 	case 2:
-		display.print("Loc ");
+		display.print(F("Loc "));
 		break;
 	case 3:
-		display.print("Melders ");
+		display.print(F("Melders "));
 		break;
 	case 4:
-		display.print("functies "); //niet in gebruik
+		display.print(F("functies ")); //niet in gebruik
 		break;
 	case 5:
-		display.print("CV ");
+		display.print(F("CV "));
 		break;
 	case 6:
-		display.print("Decoders");
+		display.print(F("Decoders"));
 		break;
 	case 7:
-		display.print("Instellen ");
+		display.print(F("Instellen "));
 		break;
 	case 8:
-		display.print("Wissels ");
+		display.print(F("Wissels "));
 		break;
 	case 9:
 		display.print("Seinen ");
 		break;
 	case 10:
-		display.print("Schrijf ");
+		display.print(F("Schrijf "));
 		break;
 	case 11:
-		display.print("Testen ");
+		display.print(F("Testen "));
 		break;
 	case 12:
-		display.print("DCC ");
+		display.print(F("DCC "));
 		break;
 	case 13:
-		display.print("< ");
+		display.print(F("< "));
 		break;
 	case 14:
-		display.print("> ");
+		display.print(F("> "));
 		break;
 	case 15:
-		display.print("S ");
+		display.print(F("S "));
 		break;
 		//***********Onderbalken
 	case 20:
-		display.print("Start  loco   FL  F1"); //in gebruik??
+		display.print(F("Start  loco   FL  F1")); //in gebruik??
 		break;
 	case 21:
-		display.print(" -     +     V     X");
+		display.print(F(" -     +     V     X"));
 		break;
 	case 22:
-		display.print("S-    S+     <>    X");
+		display.print(F("S-    S+     <>    X"));
 		break;
 	case 23:
-		display.print(" <    >     []     X");
+		display.print(F(" <    >     []     X"));
 		break;
 	case 24:
-		display.print(" -    -      -     X");
+		display.print(F(" -    -      -     X"));
 		break;
 	case 25:
-		display.print("loc   start   ?   F");// PDL_fase = 0;
+		display.print(F("loc   start   ?   F"));// PDL_fase = 0;
 		break;
 	case 26:
-		display.print("F0    F1    F2    I"); //PDL_fase =1
+		display.print(F("F0    F1    F2    I")); //PDL_fase =1
 		break;
 	case 27:
-		display.print("<>   Vmin   Vmax   D"); //PDL_fase =1
+		display.print(F("<>   Vmin   Vmax   D")); //PDL_fase =1
 		break;
 
 		//******************
 	case 30:
-		display.print(" (");
+		display.print(F(" ("));
 		break;
 	case 31:
-		display.print(") ");
+		display.print(F(") "));
 		break;
 	case 32:
-		display.print("-");
+		display.print(F("-"));
 		break;
 	case 100:
-		display.print("0 ");
+		display.print(F("0 "));
 		break;
 	case 101:
-		display.print("1 ");
+		display.print(F("1 "));
 		break;
 	case 102:
-		display.print("2 ");
+		display.print(F("2 "));
 		break;
 	case 103:
-		display.print("3 ");
+		display.print(F("3 "));
 		break;
 	case 255:
-		display.print("niet bepaald");
+		//display.print("niet bepaald");
 		break;
 	}
 }
