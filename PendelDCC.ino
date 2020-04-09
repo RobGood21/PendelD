@@ -54,10 +54,10 @@ struct route {
 	byte reg; //registers
 	/*bit0 richting.... ?????   nodig??
 	*/
-	byte Tgoal; //station is GOAL bij richting true, Fgoal=FROM
-	byte Fgoal; //station is GOAL bij richting false, Tgoal=FROM
-	byte test;
-	byte test2;
+	byte stationl; 
+	byte stationr; 
+	byte wissels;
+	byte blokkades;
 	byte test3;
 
 } ROUTE[8];
@@ -67,11 +67,9 @@ struct route {
 byte count_preample;
 byte count_byte;
 byte count_bit;
-byte count_cv;
 byte count_repeat;
 int count_slow;
 byte count_wa; //write adres
-byte count_sw;
 byte count_command;
 
 byte dcc_fase;
@@ -99,13 +97,10 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
 byte PDL_fase;
 //temps
-byte tempcount;
-
 
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-	//delay(50);
 
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
@@ -127,6 +122,10 @@ void setup() {
 	PORTB |= (1 << 0); //set pin8 high
 	 //functies = B10000000;
 	//DSP_start();
+
+	//Serial.println(PINC);
+	if (PINC == 54)Factory();
+
 	MEM_read();
 	//init
 	LOC[0].speed = B01100000;
@@ -137,6 +136,12 @@ void setup() {
 	DSP_pendel();
 	//Serial.println("setup, een lange tekst is nu weer geen probleem....");
 
+}
+void Factory() {
+	//resets EEPROM to default
+	for (byte i = 100; i < 200; i++) {
+		EEPROM.update(i, 0xFF);
+	}
 }
 
 ISR(TIMER2_COMPA_vect) {
@@ -187,13 +192,13 @@ ISR(TIMER2_COMPA_vect) {
 }
 void MEM_read() {
 	for (byte i = 0; i < 2; i++) {
-		LOC[i].adres = EEPROM.read(100+i);
+		LOC[i].adres = EEPROM.read(100 + i);
 		if (LOC[i].adres == 0xFF) {
-			LOC[i].adres = 0x03;
-			EEPROM.update(100+i, LOC[i].adres);
+			LOC[i].adres = 0x03+i;
+
 		}
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
-		LOC[i].Vmin = EEPROM.read(104+i);
+		LOC[i].Vmin = EEPROM.read(104 + i);
 		if (LOC[i].Vmin > 10)LOC[i].Vmin = 1;
 		LOC[i].Vmax = EEPROM.read(106 + i);
 		if (LOC[i].Vmax > 28)LOC[i].Vmax = 28;
@@ -201,12 +206,12 @@ void MEM_read() {
 	dcc_wissels = EEPROM.read(102);
 	if (dcc_wissels == 0xFF) {
 		dcc_wissels = 1; //default =1
-		EEPROM.update(102, dcc_wissels);
+		//EEPROM.update(102, dcc_wissels);
 	}
 	dcc_seinen = EEPROM.read(103); //heeft 16 dcc kanalen)
 	if (dcc_seinen == 0xFF) {
 		dcc_seinen = 252;
-		EEPROM.update(103, dcc_seinen);
+		//EEPROM.update(103, dcc_seinen);
 	}
 	//eerste vrij eeprom nu 108
 
@@ -220,11 +225,10 @@ void MEM_loc_update(byte loc) {
 	//updates loc data 
 	byte number;
 	number = 104 + loc;
-	EEPROM.update(number, LOC[loc].Vmin);	
+	EEPROM.update(number, LOC[loc].Vmin);
 	number = 106 + loc;
 	EEPROM.update(106, LOC[loc].Vmax);
 }
-
 void MEM_update() { //sets new values/ sends CV 
 	switch (PRG_fase) {
 	case 0: //DCC adressen
@@ -968,8 +972,8 @@ void DSP_pendel() {
 	if (GPIOR0 & (1 << 7))loc = 1; //loc keuze
 	cd;
 	switch (PDL_fase) {
-	case 0:			
-		regel1;TXT(2);		
+	case 0:
+		regel1; TXT(2);
 		TXT(101 + loc);
 		if (LOC[loc].speed & (1 << 5)) {
 			TXT(13);
@@ -1007,8 +1011,8 @@ void DSP_pendel() {
 		else {
 			TXT(14);
 		}
-		display.setCursor(32,23); display.print(LOC[loc].Vmin);
-		display.setCursor(75,23);display.print(LOC[loc].Vmax);
+		display.setCursor(32, 23); display.print(LOC[loc].Vmin);
+		display.setCursor(75, 23); display.print(LOC[loc].Vmax);
 
 		button = 3;
 		break;
