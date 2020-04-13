@@ -19,7 +19,7 @@
 //#define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 //constanten
-#define prgmax 3 //aantal programma fases(+1), verhogen bij toevoegen prgfase
+#define prgmax 4 //aantal programma fases(+1), verhogen bij toevoegen prgfase
 
 //teksten
 #define cd display.clearDisplay()
@@ -54,8 +54,8 @@ struct route {
 	byte reg; //registers
 	/*bit0 richting.... ?????   nodig??
 	*/
-	byte stationl; 
-	byte stationr; 
+	byte stationl;
+	byte stationr;
 	byte wissels;
 	byte blokkades;
 	byte test3;
@@ -194,7 +194,7 @@ void MEM_read() {
 	for (byte i = 0; i < 2; i++) {
 		LOC[i].adres = EEPROM.read(100 + i);
 		if (LOC[i].adres == 0xFF) {
-			LOC[i].adres = 0x03+i;
+			LOC[i].adres = 0x03 + i;
 
 		}
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
@@ -1027,34 +1027,39 @@ void DSP_prg() {
 	switch (PRG_level) {
 		//**********************
 	case 1: //soort instelling
+		cd; regel1;
 		switch (PRG_fase) {
+
 		case 0: //Instellen DCC adres
-			cd;
-			regel1; TXT(7); TXT(0); //Instellen
+			TXT(7); TXT(0); //Instellen
 			regel2; TXT(1); //DCC adres	
 			break;
 		case 1: //Testen
-			cd; regel1; TXT(11);
+			TXT(11);
 			break;
 		case 2: //write loc adresses
-			cd;
-			regel1; TXT(10); TXT(0);
+			TXT(10); TXT(0);
 			regel2; TXT(1); //Write DCC adres
 			break;
 		case 3: //Cv programming
-			cd;
-			regel1; TXT(10); TXT(0);
+			TXT(10); TXT(0);
 			regel2; TXT(5);
 			break;
+		case 4: //instellen routes
+			TXT(7); TXT(0); regel2; TXT(16);
+			break;
 		}
+
 		buttons = 10;
 		break;
 		//**********************************level 2
 	case 2: // program level 2
+		cd;
+		regel1s;
 		switch (PRG_fase) {
 		case 0: //keuze loc of accessoire
-			cd;
-			regel1s; TXT(7); TXT(1); TXT(0); regel2;
+			//regel1s; 
+			TXT(7); TXT(1); TXT(0); regel2;
 			switch (PRG_typeDCC) { //DCC van welke loc of accessoire keuze
 			case 0:
 				TXT(2); TXT(101);
@@ -1069,11 +1074,12 @@ void DSP_prg() {
 				TXT(9);
 				break;
 			}
-			buttons = 10;
+			//buttons = 10;
 			break;
 
 		case 1: //Testen
-			cd; regel1; TXT(11); regel2;
+			//regel1s; 
+			TXT(11); regel2;
 			switch (PRG_typeTest) {
 			case 0:
 				TXT(2); TXT(101);
@@ -1091,11 +1097,12 @@ void DSP_prg() {
 				TXT(3);
 				break;
 			}
-			buttons = 10;
+			//buttons = 10;
 			break;
 
 		case 2: //Write adres in loc and accessoires gebleven
-			cd; regel1s; TXT(10); TXT(1); regel2; TXT(2);
+			//regel1s; 
+			TXT(10); TXT(1); regel2; TXT(2);
 			switch (prg_typecv) {
 			case 0:
 				TXT(101);
@@ -1104,10 +1111,11 @@ void DSP_prg() {
 				TXT(102);
 				break;
 			}
-			buttons = 10;
+			//buttons = 10;
 			break;
 		case 3: //CV programming gebleven
-			cd; regel1s; TXT(10); TXT(5); regel2;
+			//regel1s; 
+			TXT(10); TXT(5); regel2;
 			switch (prg_typecv) {
 			case 0: //loc1
 				TXT(2); TXT(101);
@@ -1119,9 +1127,14 @@ void DSP_prg() {
 				TXT(6);
 				break;
 			}
-			buttons = 10;
+			//buttons = 10;
+			break;
+		case 4:
+			TXT(16); regel2;
+			TXT(101);
 			break;
 		}
+		buttons = 10;
 		break;
 		//**********************************level 3
 	case 3: // level 3
@@ -1202,11 +1215,9 @@ void DSP_prg() {
 				buttons = 12;
 				break;
 			case 3: //Test seinen (lvl3) 
-				TXT(9); //Testen Seinen				
-
+				TXT(9); //Testen Seinen	
 				regel2; TXT(15); display.print(1 + prg_sein);
 				position = 32;
-
 				if (prg_sein < 8) {
 					if (pos_seinen[0] & (1 << prg_sein))position = 12;
 				}
@@ -1331,6 +1342,7 @@ void TXT(byte t) {
 		break;
 	case 2:
 		display.print(F("Loc "));
+
 		break;
 	case 3:
 		display.print(F("Melders "));
@@ -1371,9 +1383,12 @@ void TXT(byte t) {
 	case 15:
 		display.print(F("S "));
 		break;
+	case 16:
+		display.print(F("Route"));
+		break;
 		//***********Onderbalken
 	case 20:
-		display.print(F("Start  loco   FL  F1")); //in gebruik??
+		display.print(F("")); //in gebruik??
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
