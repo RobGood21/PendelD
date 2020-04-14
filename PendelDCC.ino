@@ -96,8 +96,8 @@ byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
 byte PDL_fase;
+byte rt_sel=1;
 //temps
-
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -133,9 +133,7 @@ void setup() {
 	LOC[0].function = 128;
 	LOC[1].function = 128;
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
-	DSP_pendel();
-	//Serial.println("setup, een lange tekst is nu weer geen probleem....");
-
+	DSP_pendel();	
 }
 void Factory() {
 	//resets EEPROM to default
@@ -499,6 +497,10 @@ void PRG_dec() {
 			//if (PRG_cvs[1] < 1) PRG_cvs[1] = 255;
 			break;
 		}
+		break;	
+	case 4: //route keuze, let op nu een increment
+		rt_sel++;
+		if (rt_sel > 8)rt_sel = 1;
 		break;
 	}
 	//DSP_prg();
@@ -531,7 +533,6 @@ void PRG_inc() {
 				break;
 			}
 			break;
-			//break;
 		}
 		break;
 	case 1: //Testen
@@ -579,6 +580,10 @@ void PRG_inc() {
 			PRG_cvs[1]++;
 			break;
 		}
+		break;	
+	case 4: //route station links instellen 
+		ROUTE[rt_sel].stationl ++;
+		if (ROUTE[rt_sel].stationl > 8)ROUTE[rt_sel].stationl = 0;
 		break;
 	}
 }
@@ -777,8 +782,12 @@ void SW_PRG(byte sw) {
 				MEM_update();
 				PRG_level--;
 				break;
-			case 3:
+			case 3: //CV 
 				PRG_level++;
+				break;
+			case 4: //Route instellen, stationr inc.
+				ROUTE[rt_sel].stationr++;
+				if (ROUTE[rt_sel].stationr > 8)ROUTE[rt_sel].stationr = 0;
 				break;
 			}
 			break;
@@ -1054,6 +1063,7 @@ void DSP_prg() {
 		break;
 		//**********************************level 2
 	case 2: // program level 2
+		buttons = 10;
 		cd;
 		regel1s;
 		switch (PRG_fase) {
@@ -1131,10 +1141,12 @@ void DSP_prg() {
 			break;
 		case 4:
 			TXT(16); regel2;
-			TXT(101);
+			display.print(rt_sel); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
+			TXT(32); display.print(ROUTE[rt_sel].stationr); TXT(31);
+			buttons = 14;
 			break;
 		}
-		buttons = 10;
+		
 		break;
 		//**********************************level 3
 	case 3: // level 3
@@ -1321,6 +1333,9 @@ void DSP_buttons(byte mode) {
 	case 13: //testen melders, alleen sluiten
 		TXT(24);
 		break;
+	case 14: //routes instellen
+		TXT(28);
+		break;
 	default:
 		break;
 	}
@@ -1335,14 +1350,13 @@ void DSP_settxt(byte X, byte Y, byte size) {
 void TXT(byte t) {
 	switch (t) {
 	case 0:
-		display.println(F(" "));
+		display.println(F(""));
 		break;
 	case 1:
 		display.print(F("DCC adres "));
 		break;
 	case 2:
 		display.print(F("Loc "));
-
 		break;
 	case 3:
 		display.print(F("Melders "));
@@ -1388,7 +1402,7 @@ void TXT(byte t) {
 		break;
 		//***********Onderbalken
 	case 20:
-		display.print(F("")); //in gebruik??
+		display.print(F(" ")); //in gebruik??
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
@@ -1410,6 +1424,9 @@ void TXT(byte t) {
 		break;
 	case 27:
 		display.print(F("<>   Vmin   Vmax   D")); //PDL_fase =1
+		break;
+	case 28:
+		display.print(F("R     SL     SR    V")); //PDL_fase =1
 		break;
 
 		//******************
