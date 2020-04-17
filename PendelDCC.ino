@@ -58,7 +58,7 @@ struct route {
 	byte stationr;
 	byte wissels;
 	byte blokkades;
-	byte test3;
+	//byte test3;
 
 } ROUTE[8];
 
@@ -96,7 +96,7 @@ byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
 byte PDL_fase;
-byte rt_sel=1;
+byte rt_sel;
 //temps
 void setup() {
 	Serial.begin(9600);
@@ -133,7 +133,7 @@ void setup() {
 	LOC[0].function = 128;
 	LOC[1].function = 128;
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
-	DSP_pendel();	
+	DSP_pendel();
 }
 void Factory() {
 	//resets EEPROM to default
@@ -188,6 +188,7 @@ ISR(TIMER2_COMPA_vect) {
 	}
 	sei();
 }
+
 void MEM_read() {
 	for (byte i = 0; i < 2; i++) {
 		LOC[i].adres = EEPROM.read(100 + i);
@@ -210,9 +211,15 @@ void MEM_read() {
 	if (dcc_seinen == 0xFF) {
 		dcc_seinen = 252;
 		//EEPROM.update(103, dcc_seinen);
+	}	
+	for (byte i = 0; i < 8; i++) {
+		ROUTE[i].stationl = EEPROM.read(108+i);
+		ROUTE[i].stationr = EEPROM.read(116 + i);
+		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
+		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 	}
-	//eerste vrij eeprom nu 108
 
+//eerste vrij eeprom nu 124
 
 	//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
 	//pos_melderDir[1] = EEPROM.read(105);
@@ -257,9 +264,12 @@ void MEM_update() { //sets new values/ sends CV
 	case 3: //program CV
 		//prg_typecv 0=loco1; 1=loco2; 2=accessoire
 		//CVs[0]=CV; CVs[1]=Value
+
+		if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false (verplaatst 17/4)
+			//alleen uitvoeren als er  niet een CV programming bezig is
 		switch (prg_typecv) {
 		case 0:
-			if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
+			//if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
 				//Serial.println("CV schrijven");
 				DCC_cv(true, LOC[0].adres, PRG_cvs[0], PRG_cvs[1]);
 				break;
@@ -270,6 +280,12 @@ void MEM_update() { //sets new values/ sends CV
 			DCC_cv(false, dcc_wissels, PRG_cvs[0], PRG_cvs[1]);
 			break;
 			}
+		}
+		break;
+	case 4:
+		for (byte i; i < 8; i++) {
+			EEPROM.update(108 + i, ROUTE[i].stationl);
+			EEPROM.update(116 + i, ROUTE[i].stationr);
 		}
 		break;
 	}
@@ -302,9 +318,8 @@ void DCC_write() {
 }
 void DCC_endwrite() {
 	GPIOR1 &= ~(1 << 0);
-	Serial.println("adres aangepast");
+	//Serial.println("adres aangepast");
 	GPIOR1 &= ~(1 << 1);
-
 	DSP_prg();
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
@@ -497,10 +512,10 @@ void PRG_dec() {
 			//if (PRG_cvs[1] < 1) PRG_cvs[1] = 255;
 			break;
 		}
-		break;	
+		break;
 	case 4: //route keuze, let op nu een increment
 		rt_sel++;
-		if (rt_sel > 8)rt_sel = 1;
+		if (rt_sel > 7)rt_sel = 0;
 		break;
 	}
 	//DSP_prg();
@@ -564,7 +579,6 @@ void PRG_inc() {
 	case 2: //write DCC
 		prg_typecv++;
 		if (prg_typecv > 1) prg_typecv = 0; //instellen dcc accessoires komen ook hier nu maar 2 loc1 en loc2
-		//GPIOR0 ^= (1 << 7);
 		break;
 	case 3: //write CV
 		switch (PRG_level) {
@@ -580,9 +594,9 @@ void PRG_inc() {
 			PRG_cvs[1]++;
 			break;
 		}
-		break;	
+		break;
 	case 4: //route station links instellen 
-		ROUTE[rt_sel].stationl ++;
+		ROUTE[rt_sel].stationl++;
 		if (ROUTE[rt_sel].stationl > 8)ROUTE[rt_sel].stationl = 0;
 		break;
 	}
@@ -794,7 +808,14 @@ void SW_PRG(byte sw) {
 
 		case 3:
 			PRG_level--;
-			MEM_cancel();
+			switch (PRG_fase) {
+			case 4:
+				MEM_update();
+				break;
+			default:				
+				MEM_cancel();
+				break;
+			}
 			break;
 		}
 		break;
@@ -826,9 +847,7 @@ void SW_PRG(byte sw) {
 					break;
 				case 2: //wissels
 					if (GPIOR0 & ~(1 << 2)) {
-						//Serial.println("vrij");
 						pos_wissels ^= (1 << prg_wissels);
-						//Wissel direct omleggen
 						DCC_acc(0, 1, prg_wissels, (pos_wissels & (1 << prg_wissels)));
 					}
 					break;
@@ -1141,12 +1160,13 @@ void DSP_prg() {
 			break;
 		case 4:
 			TXT(16); regel2;
-			display.print(rt_sel); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
+			//rt_sel =0~7  toont 1~8
+			display.print(rt_sel+1); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
 			TXT(32); display.print(ROUTE[rt_sel].stationr); TXT(31);
 			buttons = 14;
 			break;
 		}
-		
+
 		break;
 		//**********************************level 3
 	case 3: // level 3
