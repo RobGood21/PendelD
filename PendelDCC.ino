@@ -41,13 +41,22 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 //struct's
 struct LOC {
 	//strucs max 7 bytes anders crashed alles
+	byte reg;
+	/*
+	bit0 loc rijdt
+	bit1 rijden true/ stoppen false
+
+	*/
 	byte Vmax;
 	byte Vmin;
 	byte adres; //DCC adres
 	byte speed; //Byte snelhed en richting
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
 	byte function; //functies
-	byte station;
+	byte station; //welk station staat loc in
+	byte fase; //fase in pendel cyclus
+	int wait; //ingestelde wachttijd
+	unsigned int count;
 }LOC[2];
 
 struct route {
@@ -62,7 +71,6 @@ struct route {
 
 } ROUTE[8];
 
-
 //count tellers, 
 byte count_preample;
 byte count_byte;
@@ -71,6 +79,7 @@ byte count_repeat;
 int count_slow;
 byte count_wa; //write adres
 byte count_command;
+byte count_locexe;
 
 byte dcc_fase;
 byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
@@ -83,8 +92,9 @@ byte dcc_wissels; //dcc basis adres wissel decoder
 byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
 byte pos_seinen[2]; //stand positie van de seinen
-byte pos_melders[2]; //stand van de melders
-//byte pos_melderDir[2]; // richting van de melders hoog/laag actief
+byte pos_melders[4]; //stand van de melders
+//0=melders 1-4; 1=melders 5-8; 2 is samengevoegd laatst bepaald; 3=samengevoegd huidig
+
 //program mode
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
@@ -95,9 +105,13 @@ byte prg_sein; //actief sein 16x
 byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
+
+//pendel mode
 byte PDL_fase;
 byte rt_sel;
 //temps
+
+
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -141,7 +155,6 @@ void Factory() {
 		EEPROM.update(i, 0xFF);
 	}
 }
-
 ISR(TIMER2_COMPA_vect) {
 	cli();
 	GPIOR0 ^= (1 << 0);
@@ -188,7 +201,6 @@ ISR(TIMER2_COMPA_vect) {
 	}
 	sei();
 }
-
 void MEM_read() {
 	for (byte i = 0; i < 2; i++) {
 		LOC[i].adres = EEPROM.read(100 + i);
@@ -211,19 +223,19 @@ void MEM_read() {
 	if (dcc_seinen == 0xFF) {
 		dcc_seinen = 252;
 		//EEPROM.update(103, dcc_seinen);
-	}	
+	}
 	for (byte i = 0; i < 8; i++) {
-		ROUTE[i].stationl = EEPROM.read(108+i);
+		ROUTE[i].stationl = EEPROM.read(108 + i);
 		ROUTE[i].stationr = EEPROM.read(116 + i);
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 	}
 
-//eerste vrij eeprom nu 124
+	//eerste vrij eeprom nu 124
 
-	//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
-	//pos_melderDir[1] = EEPROM.read(105);
-	//default=0xFF 255
+		//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
+		//pos_melderDir[1] = EEPROM.read(105);
+		//default=0xFF 255
 
 }
 void MEM_loc_update(byte loc) {
@@ -267,18 +279,18 @@ void MEM_update() { //sets new values/ sends CV
 
 		if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false (verplaatst 17/4)
 			//alleen uitvoeren als er  niet een CV programming bezig is
-		switch (prg_typecv) {
-		case 0:
-			//if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
-				//Serial.println("CV schrijven");
+			switch (prg_typecv) {
+			case 0:
+				//if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
+					//Serial.println("CV schrijven");
 				DCC_cv(true, LOC[0].adres, PRG_cvs[0], PRG_cvs[1]);
 				break;
-		case 1://loco 2
-			DCC_cv(true, LOC[1].adres, PRG_cvs[0], PRG_cvs[1]);
-			break;
-		case 2: //wissels
-			DCC_cv(false, dcc_wissels, PRG_cvs[0], PRG_cvs[1]);
-			break;
+			case 1://loco 2
+				DCC_cv(true, LOC[1].adres, PRG_cvs[0], PRG_cvs[1]);
+				break;
+			case 2: //wissels
+				DCC_cv(false, dcc_wissels, PRG_cvs[0], PRG_cvs[1]);
+				break;
 			}
 		}
 		break;
@@ -387,6 +399,49 @@ void LOC_calc(byte loc) {
 
 	//Serial.println(loc);
 	//Serial.println(LOC[loc].speed, BIN);
+}
+void LOC_exe() {
+	byte loc = 0;;
+	GPIOR1 ^= (1 << 2); //toggle active loc
+	if (GPIOR1 & (1 << 2))loc = 1;
+
+	if (LOC[loc].wait < LOC[loc].count) {
+		LOC[loc].count = 0; //reset clock
+		switch (LOC[loc].fase) {
+		case 0: //waiting in station
+			if (LOC[loc].station == 0)LOC[loc].fase = 100;
+			LOC[loc].fase ++;
+			break;
+		case 1: //begin route zoeken
+
+
+
+			//geen route gevonden, wachttijd instellen
+			LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+
+
+			break;
+		case 101: //begin find starting point (station)
+			LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+			//zorg dat de andere loc niet rijdt
+			//zet alle wissels in recht posities zodanig dat de locs niet naar  elkaar kunnen rijden
+			//Hier is een stukje handmatig en gezond verstand van de gebruiker nodig.
+
+			//leg huidige melders status vast
+			pos_melders[2] = MELDERS();
+			Serial.println(pos_melders[2], BIN);
+
+			break;
+		}
+	}
+	LOC[loc].count++;
+}
+byte MELDERS(){
+	byte melder;
+	melder = pos_melders[1] << 4;
+	melder = melder + pos_melders[0];
+	//merk op 0=bezet
+return melder;
 }
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
@@ -812,7 +867,7 @@ void SW_PRG(byte sw) {
 			case 4:
 				MEM_update();
 				break;
-			default:				
+			default:
 				MEM_cancel();
 				break;
 			}
@@ -931,7 +986,7 @@ void SW_pendel(byte sw) {
 			//LOC[0].speed = B01101110; //drive	
 			break;
 		case 1:
-			LOC[0].speed = B01100000; //stop
+			LOC[loc].reg ^= (1 << 0); //toggle start/stop
 			break;
 		case 2:
 			//Serial.println("Een lange tekst");
@@ -1161,7 +1216,7 @@ void DSP_prg() {
 		case 4:
 			TXT(16); regel2;
 			//rt_sel =0~7  toont 1~8
-			display.print(rt_sel+1); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
+			display.print(rt_sel + 1); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
 			TXT(32); display.print(ROUTE[rt_sel].stationr); TXT(31);
 			buttons = 14;
 			break;
@@ -1333,6 +1388,7 @@ void DSP_buttons(byte mode) {
 		TXT(20);
 		break;
 	case 1: //Pendel, start LOC # S R PDL_fase=0
+			//start moet hier wisselen met stop....
 		TXT(25);
 		break;
 	case 2: //functies van de loc PDL_fase 1
@@ -1341,6 +1397,7 @@ void DSP_buttons(byte mode) {
 	case 3: //instellingen van de loc, dir, vmax vmin
 		TXT(27);
 		break;
+
 	case 10: //standaard programmeer balk
 		TXT(21);
 		break;
@@ -1485,6 +1542,11 @@ void loop() {	//slow events timer
 		//slow events
 		SW_exe(); //switches
 		//start DCC command transmit
+		count_locexe++;
+		if (count_locexe > 10) {
+			LOC_exe();
+			count_locexe = 0;
+		}
 		if (GPIOR1 & (1 << 0))DCC_write(); //writing dcc adres in loc
 		DCC_command();
 		dcc_fase = 1;

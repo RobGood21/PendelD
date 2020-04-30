@@ -109,6 +109,9 @@
   <ItemGroup>
     <ClInclude Include="__vm\.PendelD.vsarduino.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="Beschrijving PendelDCC.txt" />
+  </ItemGroup>
   <PropertyGroup>
     <DebuggerFlavor>VisualMicroDebugger</DebuggerFlavor>
   </PropertyGroup>

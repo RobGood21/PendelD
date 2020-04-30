@@ -22,4 +22,7 @@
   <ItemGroup>
     <None Include="PendelDCC.ino" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="Beschrijving PendelDCC.txt" />
+  </ItemGroup>
 </Project>
