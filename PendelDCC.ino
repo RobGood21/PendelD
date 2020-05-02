@@ -43,8 +43,8 @@ struct LOC {
 	//strucs max 7 bytes anders crashed alles
 	byte reg;
 	/*
-	bit0 loc rijdt
-	bit1 rijden true/ stoppen false
+	bit0 start, rijden true, stop false
+	bit1
 
 	*/
 	byte Vmax;
@@ -397,51 +397,75 @@ void LOC_calc(byte loc) {
 	LOC[loc].speed &= ~(B00011111 << 0); //clear bit 0~4
 	LOC[loc].speed = LOC[loc].speed + speed;
 
-	//Serial.println(loc);
-	//Serial.println(LOC[loc].speed, BIN);
+	//vreemde plek?  iedere aanpassing in loc moet zichtbaar worden toch?
+	DSP_pendel();
 }
 void LOC_exe() {
-	byte loc = 0;;
+	byte loc = 0; byte changed;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
+	//dit proces loopt alleen als loc.reg bit 0 = true
+	if (LOC[loc].reg & (1 << 0)) {
 
-	if (LOC[loc].wait < LOC[loc].count) {
-		LOC[loc].count = 0; //reset clock
-		switch (LOC[loc].fase) {
-		case 0: //waiting in station
-			if (LOC[loc].station == 0)LOC[loc].fase = 100;
-			LOC[loc].fase ++;
-			break;
-		case 1: //begin route zoeken
+		if (LOC[loc].wait < LOC[loc].count) {
+			LOC[loc].count = 0; //reset clock
 
+			switch (LOC[loc].fase) {
+			case 0: //waiting in station
+				if (LOC[loc].station == 0)LOC[loc].fase = 100;
+				LOC[loc].fase++;
+				break;
+			case 1: //begin route zoeken
+				//geen route gevonden, wachttijd instellen
+				LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
 
+				break;
+			case 101: //begin find starting point (station)
+				LOC[loc].wait = 5; //timing testen melders
+				//zorg dat de andere loc niet rijdt
+				//zet alle wissels in recht posities zodanig dat de locs niet naar  elkaar kunnen rijden
+				//Hier is een stukje handmatig en gezond verstand van de gebruiker nodig.
 
-			//geen route gevonden, wachttijd instellen
-			LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+				//leg huidige melders status vast
+				pos_melders[2] = MELDERS();
+				pos_melders[3] = pos_melders[2];
 
+				LOC[loc].velo = 2; LOC_calc(loc);
+				LOC[loc].fase = 102;
+				break;
+			case 102:
+				//Serial.println(pos_melders[2], BIN);
+				//testen of er een verandering is in richting
+				pos_melders[3] = MELDERS();
+				changed = pos_melders[3] ^ pos_melders[2];
+				if (changed > 0) {
 
-			break;
-		case 101: //begin find starting point (station)
-			LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
-			//zorg dat de andere loc niet rijdt
-			//zet alle wissels in recht posities zodanig dat de locs niet naar  elkaar kunnen rijden
-			//Hier is een stukje handmatig en gezond verstand van de gebruiker nodig.
-
-			//leg huidige melders status vast
-			pos_melders[2] = MELDERS();
-			Serial.println(pos_melders[2], BIN);
-
-			break;
+					for (byte i = 0; i < 8; i++) {
+						if (changed & (1 << i)) { //find changed melder
+							if (pos_melders[3] & (1 << i)) { //melder vrij gekomen
+								LOC[loc].speed ^= (1 << 5); //change direction
+								pos_melders[2] = pos_melders[3];
+							}
+							else { //melder bezet, station bekend
+								LOC[loc].station = i+1;
+								LOC[loc].velo = 0; LOC_calc(loc); //stop
+							}
+						}
+					}
+				}
+				break;
+			}
 		}
+		LOC[loc].count++;
 	}
-	LOC[loc].count++;
+
 }
-byte MELDERS(){
+byte MELDERS() {
 	byte melder;
 	melder = pos_melders[1] << 4;
 	melder = melder + pos_melders[0];
 	//merk op 0=bezet
-return melder;
+	return melder;
 }
 void PRG_locadres(byte newadres, byte all) {
 	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
@@ -987,6 +1011,14 @@ void SW_pendel(byte sw) {
 			break;
 		case 1:
 			LOC[loc].reg ^= (1 << 0); //toggle start/stop
+
+			if (LOC[loc].reg & (1 << 0)) {  //start rijden process
+				LOC[loc].fase = 0;
+				LOC[loc].wait = 0;
+			}
+			else { //stop locomotief
+				LOC[loc].velo = 0; LOC_calc(loc);
+			}
 			break;
 		case 2:
 			//Serial.println("Een lange tekst");
@@ -1068,7 +1100,12 @@ void DSP_pendel() {
 		display.fillRect(5, 22, 23, 23, WHITE);
 		display.setTextColor(BLACK);
 		display.setCursor(10, 27); display.print(LOC[loc].station);
-		button = 1;
+		if (LOC[loc].reg & (1 << 0)) {
+			button = 4;
+		}
+		else {
+			button = 1;
+		}
 		break;
 	case 1:
 		regel1s, TXT(2); //TXT(101 + loc); 
@@ -1397,6 +1434,9 @@ void DSP_buttons(byte mode) {
 	case 3: //instellingen van de loc, dir, vmax vmin
 		TXT(27);
 		break;
+	case 4:
+		TXT(20); //pendel in stop
+		break;
 
 	case 10: //standaard programmeer balk
 		TXT(21);
@@ -1479,7 +1519,7 @@ void TXT(byte t) {
 		break;
 		//***********Onderbalken
 	case 20:
-		display.print(F(" ")); //in gebruik??
+		display.print(F("loc   stop    ?    F")); //in gebruik??
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
@@ -1494,7 +1534,7 @@ void TXT(byte t) {
 		display.print(F(" -    -      -     X"));
 		break;
 	case 25:
-		display.print(F("loc   start   ?   F"));// PDL_fase = 0;
+		display.print(F("loc   start   ?    F"));// PDL_fase = 0;
 		break;
 	case 26:
 		display.print(F("F0    F1    F2    I")); //PDL_fase =1
