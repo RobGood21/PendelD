@@ -44,7 +44,7 @@ struct LOC {
 	byte reg;
 	/*
 	bit0 start, rijden true, stop false
-	bit1
+	bit1 relatieve richting rijdend naar rechts of rijdend naar links
 
 	*/
 	byte Vmax;
@@ -206,7 +206,6 @@ void MEM_read() {
 		LOC[i].adres = EEPROM.read(100 + i);
 		if (LOC[i].adres == 0xFF) {
 			LOC[i].adres = 0x03 + i;
-
 		}
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
 		LOC[i].Vmin = EEPROM.read(104 + i);
@@ -236,7 +235,6 @@ void MEM_read() {
 		//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
 		//pos_melderDir[1] = EEPROM.read(105);
 		//default=0xFF 255
-
 }
 void MEM_loc_update(byte loc) {
 	//updates loc data 
@@ -401,7 +399,7 @@ void LOC_calc(byte loc) {
 	DSP_pendel();
 }
 void LOC_exe() {
-	byte loc = 0; byte changed;
+	byte loc = 0; byte changed; byte count=0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	//dit proces loopt alleen als loc.reg bit 0 = true
@@ -416,12 +414,43 @@ void LOC_exe() {
 				LOC[loc].fase++;
 				break;
 			case 1: //begin route zoeken
+				//een relatieve rijrichting is hier nodig, dit is de absolute richting waarin de loc 
+				//dit station heeft bereikt in combinatie met het vinden van het beginstation door verlaten of door bereiken
+				//het verlaten van een station moet de relatieve richting omzetten. reg. bit1 
+				//false =links rechts; true = rechts links
+				//handmatig omzetten van richting zet relatieve richting NIET om 
+				//start is dus altijd de loc van links naar rechts. Starten in een rechts eindblok is niet toegestaan
+
+				//eerst zoeken of er wel een route in deze richting is
+				for (byte i = 0; i < 8; i++) {
+					if (LOC[loc].reg & (1 << 1)) {
+						if (ROUTE[i].stationr == LOC[loc].station)count++;
+					}
+					else {
+						if (ROUTE[i].stationl == LOC[loc].station)count++;
+					}
+				}
+
+				switch (count) {
+				case 0: //geen route in deze richting, verander richting (virtueel en actueel)
+					Serial.println("NUL");
+					break;
+				case 1: //1 route gevonden in deze richting, kies route als vrij!!
+					Serial.println("eentje");
+					break;
+				default://kies willekeurige route, check of deze voldoet en vrij is daarna kiezen
+					Serial.println(count);
+					break;
+				}
+
 				//geen route gevonden, wachttijd instellen
-				LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+				//LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+
+				LOC[loc].fase = 200; //tijdelijke stop proces
 
 				break;
 			case 101: //begin find starting point (station)
-				LOC[loc].wait = 5; //timing testen melders
+				//LOC[loc].wait = 5; //timing testen melders
 				//zorg dat de andere loc niet rijdt
 				//zet alle wissels in recht posities zodanig dat de locs niet naar  elkaar kunnen rijden
 				//Hier is een stukje handmatig en gezond verstand van de gebruiker nodig.
@@ -443,12 +472,14 @@ void LOC_exe() {
 					for (byte i = 0; i < 8; i++) {
 						if (changed & (1 << i)) { //find changed melder
 							if (pos_melders[3] & (1 << i)) { //melder vrij gekomen
-								LOC[loc].speed ^= (1 << 5); //change direction
+								LOC[loc].speed ^= (1 << 5); //change actual direction
+								LOC[loc].reg ^= (1 << 1);// change virtual direction (L<>R)
 								pos_melders[2] = pos_melders[3];
 							}
 							else { //melder bezet, station bekend
 								LOC[loc].station = i+1;
 								LOC[loc].velo = 0; LOC_calc(loc); //stop
+								LOC[loc].fase = 0;
 							}
 						}
 					}
@@ -458,7 +489,6 @@ void LOC_exe() {
 		}
 		LOC[loc].count++;
 	}
-
 }
 byte MELDERS() {
 	byte melder;
@@ -1253,7 +1283,7 @@ void DSP_prg() {
 		case 4:
 			TXT(16); regel2;
 			//rt_sel =0~7  toont 1~8
-			display.print(rt_sel + 1); TXT(20); TXT(30); display.print(ROUTE[rt_sel].stationl);
+			display.print(rt_sel + 1); TXT(200); TXT(30); display.print(ROUTE[rt_sel].stationl);
 			TXT(32); display.print(ROUTE[rt_sel].stationr); TXT(31);
 			buttons = 14;
 			break;
@@ -1556,6 +1586,9 @@ void TXT(byte t) {
 	case 32:
 		display.print(F("-"));
 		break;
+	//case 33:
+	//	display.print(F(" "));
+	//	break;
 	case 100:
 		display.print(F("0 "));
 		break;
@@ -1567,6 +1600,9 @@ void TXT(byte t) {
 		break;
 	case 103:
 		display.print(F("3 "));
+		break;
+	case 200:
+		display.print(F(" "));
 		break;
 	case 255:
 		//display.print("niet bepaald");
