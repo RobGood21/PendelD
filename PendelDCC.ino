@@ -45,7 +45,7 @@ struct LOC {
 	/*
 	bit0 start, rijden true, stop false
 	bit1 relatieve richting rijdend naar rechts of rijdend naar links
-
+	bit2 tijdelijk bit geeft aan of er een route in de richting kan worden gekozen
 	*/
 	byte Vmax;
 	byte Vmin;
@@ -396,10 +396,10 @@ void LOC_calc(byte loc) {
 	LOC[loc].speed = LOC[loc].speed + speed;
 
 	//vreemde plek?  iedere aanpassing in loc moet zichtbaar worden toch?
-	DSP_pendel();
+	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte count=0;
+	byte loc = 0; byte changed; byte count = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	//dit proces loopt alleen als loc.reg bit 0 = true
@@ -431,22 +431,41 @@ void LOC_exe() {
 					}
 				}
 
-				switch (count) {
-				case 0: //geen route in deze richting, verander richting (virtueel en actueel)
+				if (count == 0) {
+					if (LOC[loc].reg & (1 << 2)) { //ook in andere richting geen route
+						//geen route te vinden stoppen
+						LOC[loc].fase = 200;
+					}
+					else { //richting aanpassen opnieuw testen
+						LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
+						LOC[loc].reg |= (1 << 2);
+					}
 					Serial.println("NUL");
-					break;
-				case 1: //1 route gevonden in deze richting, kies route als vrij!!
-					Serial.println("eentje");
-					break;
-				default://kies willekeurige route, check of deze voldoet en vrij is daarna kiezen
-					Serial.println(count);
-					break;
 				}
+				else { //er zijn mogelijke routes
+					LOC[loc].fase = 5;
 
-				//geen route gevonden, wachttijd instellen
-				//LOC[loc].wait = 10; //wachten voordat nieuwe route wordt gezocht
+				}
+				break;
+			case 5:
+				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
+				//LOC[loc].fase = 200; //tijdelijke stop proces
+				count = random(0, 8);
+				Serial.println(count);
+				//checken of random gekozen route akkoord is
+				//eerst richting
 
-				LOC[loc].fase = 200; //tijdelijke stop proces
+				if (LOC[loc].reg & (1 << 1)) { //l>R
+					if (ROUTE[count].stationr != LOC[loc].station)count = 0xFF;
+				}
+				else { //R>L
+					if (ROUTE[count].stationl != LOC[loc].station)count = 0XFF;
+				}
+				if (count < 0xFF) {
+					//wissel enzo nog testen
+					Serial.println("jo, free");
+					LOC[loc].fase = 200; //stop temp
+				}
 
 				break;
 			case 101: //begin find starting point (station)
@@ -459,7 +478,7 @@ void LOC_exe() {
 				pos_melders[2] = MELDERS();
 				pos_melders[3] = pos_melders[2];
 
-				LOC[loc].velo = 2; LOC_calc(loc);
+				LOC[loc].velo = 3; LOC_calc(loc);
 				LOC[loc].fase = 102;
 				break;
 			case 102:
@@ -468,7 +487,6 @@ void LOC_exe() {
 				pos_melders[3] = MELDERS();
 				changed = pos_melders[3] ^ pos_melders[2];
 				if (changed > 0) {
-
 					for (byte i = 0; i < 8; i++) {
 						if (changed & (1 << i)) { //find changed melder
 							if (pos_melders[3] & (1 << i)) { //melder vrij gekomen
@@ -477,13 +495,18 @@ void LOC_exe() {
 								pos_melders[2] = pos_melders[3];
 							}
 							else { //melder bezet, station bekend
-								LOC[loc].station = i+1;
+								LOC[loc].station = i + 1;
 								LOC[loc].velo = 0; LOC_calc(loc); //stop
 								LOC[loc].fase = 0;
 							}
 						}
 					}
 				}
+				break;
+			case 200:
+				Serial.println("stop");
+				LOC[loc].reg &= ~(1 << 0); //stop
+				DSP_pendel();
 				break;
 			}
 		}
@@ -1586,9 +1609,9 @@ void TXT(byte t) {
 	case 32:
 		display.print(F("-"));
 		break;
-	//case 33:
-	//	display.print(F(" "));
-	//	break;
+		//case 33:
+		//	display.print(F(" "));
+		//	break;
 	case 100:
 		display.print(F("0 "));
 		break;
