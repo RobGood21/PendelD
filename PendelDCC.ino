@@ -54,6 +54,7 @@ struct LOC {
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
 	byte function; //functies
 	byte station; //welk station staat loc in
+	byte goal; //welk station is loc onderweg
 	byte fase; //fase in pendel cyclus
 	int wait; //ingestelde wachttijd
 	unsigned int count;
@@ -399,7 +400,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte count = 0;
+	byte loc = 0; byte changed; byte temp = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	//dit proces loopt alleen als loc.reg bit 0 = true
@@ -412,6 +413,7 @@ void LOC_exe() {
 			case 0: //waiting in station
 				if (LOC[loc].station == 0)LOC[loc].fase = 100;
 				LOC[loc].fase++;
+				LOC[loc].wait = 0;
 				break;
 			case 1: //begin route zoeken
 				//een relatieve rijrichting is hier nodig, dit is de absolute richting waarin de loc 
@@ -424,14 +426,14 @@ void LOC_exe() {
 				//eerst zoeken of er wel een route in deze richting is
 				for (byte i = 0; i < 8; i++) {
 					if (LOC[loc].reg & (1 << 1)) {
-						if (ROUTE[i].stationr == LOC[loc].station)count++;
+						if (ROUTE[i].stationr == LOC[loc].station)temp ++;
 					}
 					else {
-						if (ROUTE[i].stationl == LOC[loc].station)count++;
+						if (ROUTE[i].stationl == LOC[loc].station)temp ++;
 					}
 				}
 
-				if (count == 0) {
+				if (temp == 0) {
 					if (LOC[loc].reg & (1 << 2)) { //ook in andere richting geen route
 						//geen route te vinden stoppen
 						LOC[loc].fase = 200;
@@ -440,31 +442,49 @@ void LOC_exe() {
 						LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
 						LOC[loc].reg |= (1 << 2);
 					}
-					Serial.println("NUL");
+					//Serial.println("geen route");
 				}
 				else { //er zijn mogelijke routes
 					LOC[loc].fase = 5;
-
+					LOC[loc].reg &= ~(1 << 2);
 				}
 				break;
 			case 5:
 				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
 				//LOC[loc].fase = 200; //tijdelijke stop proces
-				count = random(0, 8);
-				Serial.println(count);
+				temp = random(0, 8);
+				Serial.println(temp);
 				//checken of random gekozen route akkoord is
-				//eerst richting
+				//eerst richting, dirct doelstation vastleggen
 
+				LOC[loc].goal = 0;
 				if (LOC[loc].reg & (1 << 1)) { //l>R
-					if (ROUTE[count].stationr != LOC[loc].station)count = 0xFF;
+					if (ROUTE[temp].stationr == LOC[loc].station) LOC[loc].goal = ROUTE[temp].stationl;
 				}
 				else { //R>L
-					if (ROUTE[count].stationl != LOC[loc].station)count = 0XFF;
+					if (ROUTE[temp].stationl == LOC[loc].station)LOC[loc].goal = ROUTE[temp].stationr;
 				}
-				if (count < 0xFF) {
+				if (LOC[loc].goal > 0 ) {
 					//wissel enzo nog testen
-					Serial.println("jo, free");
-					LOC[loc].fase = 200; //stop temp
+					//Serial.print("Doelstation: ");  Serial.println(LOC[loc].goal);
+					LOC[loc].fase = 10; 
+				}
+				break;
+			case 10: //drive
+				LOC[loc].velo = 3; LOC_calc(loc);
+				LOC[loc].fase = 15;
+				break;
+			case 15:
+				//test of doelstation is bereikt, temp is weer vrij
+				temp = MELDERS();
+				Serial.println(temp, BIN);
+				if (~temp & (1 << LOC[loc].goal-1)) { //stations 1~8  melders 0~7
+					
+					LOC[loc].station = LOC[loc].goal;
+					LOC[loc].goal = 0;
+					LOC[loc].velo = 0; LOC_calc(loc);
+					LOC[loc].wait = 10;
+					LOC[loc].fase = 0;
 				}
 
 				break;
@@ -1150,9 +1170,12 @@ void DSP_pendel() {
 			TXT(14);
 		}
 		display.print(LOC[loc].velo);
-		display.fillRect(5, 22, 23, 23, WHITE);
-		display.setTextColor(BLACK);
-		display.setCursor(10, 27); display.print(LOC[loc].station);
+		regel2; display.print(LOC[loc].station);TXT(32); display.print(LOC[loc].goal);
+		
+		//display.fillRect(5, 22, 23, 23, WHITE);
+		//display.setTextColor(BLACK);
+		//display.setCursor(10, 27); display.print(LOC[loc].station);
+
 		if (LOC[loc].reg & (1 << 0)) {
 			button = 4;
 		}
