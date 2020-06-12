@@ -20,7 +20,7 @@ PINS
 
 8	DCC data out
 9	DCC on/off switch
-10
+10	DCC short detect
 11	DCC enable
 12
 13

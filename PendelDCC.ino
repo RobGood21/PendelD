@@ -66,7 +66,7 @@ struct route {
 	*/
 	byte stationl;
 	byte stationr;
-	byte wissels;
+	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
 	byte blokkades;
 	//byte test3;
 
@@ -124,7 +124,8 @@ void setup() {
 	DDRD |= (1 << 3); //pin3 as output
 	PORTD |= (B11110000 << 0); //Pull up to pin 7,6,5,4
 	DDRB |= (1 << 0); //PIN8 as output enable DCC
-	PORTB |= (1 << 1); //puuup to pin 9
+	PORTB |= (1 << 1); //pullup to pin 9, DCC on/off swtch
+	PORTB |= (1 << 2); //Pullup to PIN 10, Short detect
 	sw_statusC = 0xFF;
 	sw_statusD = 0xFF;
 	//interrupt register settings
@@ -200,6 +201,9 @@ ISR(TIMER2_COMPA_vect) {
 			break;
 		}
 	}
+
+	//check for short
+	if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
 	sei();
 }
 void MEM_read() {
@@ -227,11 +231,12 @@ void MEM_read() {
 	for (byte i = 0; i < 8; i++) {
 		ROUTE[i].stationl = EEPROM.read(108 + i);
 		ROUTE[i].stationr = EEPROM.read(116 + i);
+		ROUTE[i].wissels = EEPROM.read(124 + i); //let op default is 0xFF, dus false is bezet.....
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 	}
 
-	//eerste vrij eeprom nu 124
+	//eerste vrij eeprom nu 132
 
 		//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
 		//pos_melderDir[1] = EEPROM.read(105);
@@ -293,10 +298,13 @@ void MEM_update() { //sets new values/ sends CV
 			}
 		}
 		break;
-	case 4:
+	case 4: //Program fase 4 Routes
+		//nog aanpassen zodat alleen bij verlaten van update routes dit wordt gedaan...niet na iedere druk op knop 3
+
 		for (byte i; i < 8; i++) {
 			EEPROM.update(108 + i, ROUTE[i].stationl);
 			EEPROM.update(116 + i, ROUTE[i].stationr);
+			EEPROM.update(124 + i, ROUTE[i].wissels);
 		}
 		break;
 	}
@@ -426,10 +434,10 @@ void LOC_exe() {
 				//eerst zoeken of er wel een route in deze richting is
 				for (byte i = 0; i < 8; i++) {
 					if (LOC[loc].reg & (1 << 1)) {
-						if (ROUTE[i].stationr == LOC[loc].station)temp ++;
+						if (ROUTE[i].stationr == LOC[loc].station)temp++;
 					}
 					else {
-						if (ROUTE[i].stationl == LOC[loc].station)temp ++;
+						if (ROUTE[i].stationl == LOC[loc].station)temp++;
 					}
 				}
 
@@ -464,10 +472,10 @@ void LOC_exe() {
 				else { //R>L
 					if (ROUTE[temp].stationl == LOC[loc].station)LOC[loc].goal = ROUTE[temp].stationr;
 				}
-				if (LOC[loc].goal > 0 ) {
+				if (LOC[loc].goal > 0) {
 					//wissel enzo nog testen
 					//Serial.print("Doelstation: ");  Serial.println(LOC[loc].goal);
-					LOC[loc].fase = 10; 
+					LOC[loc].fase = 10;
 				}
 				break;
 			case 10: //drive
@@ -478,8 +486,8 @@ void LOC_exe() {
 				//test of doelstation is bereikt, temp is weer vrij
 				temp = MELDERS();
 				Serial.println(temp, BIN);
-				if (~temp & (1 << LOC[loc].goal-1)) { //stations 1~8  melders 0~7
-					
+				if (~temp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7
+
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].velo = 0; LOC_calc(loc);
@@ -666,8 +674,17 @@ void PRG_dec() {
 		}
 		break;
 	case 4: //route keuze, let op nu een increment
-		rt_sel++;
-		if (rt_sel > 7)rt_sel = 0;
+		switch (PRG_level) {
+		case 2: //route keuze
+			rt_sel++;
+			if (rt_sel > 7)rt_sel = 0;
+			break;
+		case 3: //keuze wissel in route
+			prg_wissels++;
+			if (prg_wissels > 3)prg_wissels = 0;
+			break;
+		}
+
 		break;
 	}
 	//DSP_prg();
@@ -748,8 +765,15 @@ void PRG_inc() {
 		}
 		break;
 	case 4: //route station links instellen 
-		ROUTE[rt_sel].stationl++;
-		if (ROUTE[rt_sel].stationl > 8)ROUTE[rt_sel].stationl = 0;
+		switch (PRG_level) {
+		case 2:
+			ROUTE[rt_sel].stationl++;
+			if (ROUTE[rt_sel].stationl > 8)ROUTE[rt_sel].stationl = 0;
+			break;
+		case 3: //route wissel bezet zetten
+			ROUTE[rt_sel].wissels ^= (1 << (7 - prg_wissels)); //toggle bit 7~4 
+			break;
+		}
 		break;
 	}
 }
@@ -793,7 +817,9 @@ void SW_exe() {
 	if (GPIOR0 & (1 << 4)) {
 		//DCC enabled switch lezen
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
-			if (~PINB & (1 << 1)) PINB |= (1 << 0); //Serial.print("*");
+
+			if (~PINB & (1 << 1)) PINB |= (1 << 0); //toggle DCC enabled
+
 			if (PINB & (1 << 1)) {
 				GPIOR1 |= (1 << 3);
 			}
@@ -959,12 +985,15 @@ void SW_PRG(byte sw) {
 			break;
 
 		case 3:
-			PRG_level--;
 			switch (PRG_fase) {
 			case 4:
 				MEM_update();
+				PRG_level++;
+				//Serial.println(PRG_level);
 				break;
+
 			default:
+				PRG_level--;
 				MEM_cancel();
 				break;
 			}
@@ -988,7 +1017,6 @@ void SW_PRG(byte sw) {
 				PRG_level--;
 				MEM_update();
 				break;
-
 			case 1: //Testen, knop 2(3e)
 				switch (PRG_typeTest) {
 				case 0: //loc 1
@@ -1030,16 +1058,36 @@ void SW_PRG(byte sw) {
 			case 3: //CV programmering
 				PRG_level++;
 				break;
+			case 4: //Route, direction wissel instellen
+				ROUTE[rt_sel].wissels ^= (1 << 3 - prg_wissels);
+				//UITVOEREN wissel omzetten hier....
+				DCC_acc(false, true, prg_wissels, ROUTE[rt_sel].wissels & (1 << 3 - prg_wissels));
+				break;
 			}
 			break;
 
-		case 3:
+		case 3: //switch 3, level 3
+
+			//loc stoppen?? Waarom? Voor handbediening beter niet...weggehaald 12juni2020
+
+			/*
+
 			if (PRG_typeTest < 2) {
 				LOC[PRG_typeTest].velo = 0;
 				LOC_calc(PRG_typeTest);
 			}
-			PRG_level--;
-			MEM_cancel();
+*/
+			switch (PRG_fase) {
+			case 4:
+
+				break;
+			default:
+				PRG_level--;
+				MEM_cancel();
+				break;
+			}
+
+
 			break;
 		}
 		break;
@@ -1069,6 +1117,7 @@ void SW_PRG(byte sw) {
 		break;
 	}
 	if (~GPIOR1 & (1 << 1)) DSP_prg();
+	//DSP_prg();
 	//dit bit zorgt dat pas na de bewerking, bv. adres schrijven
 //het display vernieuwd ibv. progressbar bv.
 }
@@ -1094,8 +1143,13 @@ void SW_pendel(byte sw) {
 			}
 			break;
 		case 2:
-			//Serial.println("Een lange tekst");
-			//LOC[0].function ^= (1 << 4); //headlights
+			if (LOC[loc].reg & (1 << 0)) {
+				//11juni nog geen functie
+			}
+			else {//wis stations
+				LOC[loc].station = 0;
+				LOC[loc].goal = 0;
+			}
 			break;
 		case 3:
 			PDL_fase++; //level hoger
@@ -1164,14 +1218,14 @@ void DSP_pendel() {
 		regel1; TXT(2);
 		TXT(101 + loc);
 		if (LOC[loc].speed & (1 << 5)) {
-			TXT(13);
-		}
-		else {
 			TXT(14);
 		}
+		else {
+			TXT(13);
+		}
 		display.print(LOC[loc].velo);
-		regel2; display.print(LOC[loc].station);TXT(32); display.print(LOC[loc].goal);
-		
+		regel2; display.print(LOC[loc].station); TXT(32); display.print(LOC[loc].goal);
+
 		//display.fillRect(5, 22, 23, 23, WHITE);
 		//display.setTextColor(BLACK);
 		//display.setCursor(10, 27); display.print(LOC[loc].station);
@@ -1202,10 +1256,10 @@ void DSP_pendel() {
 		regel1s, TXT(2); //TXT(101 + loc); 
 		TXT(7); regel2;
 		if (LOC[loc].speed & (1 << 5)) {
-			TXT(13);
+			TXT(14);
 		}
 		else {
-			TXT(14);
+			TXT(13);
 		}
 		display.setCursor(32, 23); display.print(LOC[loc].Vmin);
 		display.setCursor(75, 23); display.print(LOC[loc].Vmax);
@@ -1334,7 +1388,6 @@ void DSP_prg() {
 			buttons = 14;
 			break;
 		}
-
 		break;
 		//**********************************level 3
 	case 3: // level 3
@@ -1365,12 +1418,11 @@ void DSP_prg() {
 				TXT(30);
 				adrs = (((dcc_seinen - 1) * 4) + 1);
 				display.print(adrs); TXT(32); display.print(adrs + 15); TXT(31);//seinen heeft 16 adressen max 32 leds
-
-
 				break;
 			}
 			buttons = 10;
 			break;
+
 		case 1: //Testen
 			cd; regel1s; TXT(11);
 			switch (PRG_typeTest) {
@@ -1378,10 +1430,10 @@ void DSP_prg() {
 				TXT(2); TXT(101);
 				regel2;
 				if (LOC[0].speed & (1 << 5)) {
-					TXT(13);
+					TXT(14);
 				}
 				else {
-					TXT(14);
+					TXT(13);
 				}
 				display.print(LOC[0].velo);
 				buttons = 11;
@@ -1391,10 +1443,10 @@ void DSP_prg() {
 				TXT(2); TXT(102);
 				regel2;
 				if (LOC[1].speed & (1 << 5)) {
-					TXT(13);
+					TXT(14);
 				}
 				else {
-					TXT(14);
+					TXT(13);
 				}
 				display.print(LOC[1].velo);
 				buttons = 11;
@@ -1454,8 +1506,29 @@ void DSP_prg() {
 			//display.print(PRG_cvs[0]);
 			buttons = 10;
 			break;
+		case 4: //routes wissels vastleggen
+			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(8);
+			regel2; display.print(prg_wissels + 1);
+			if (ROUTE[rt_sel].wissels & (1 << (7 - prg_wissels))) {
+				display.fillRect(33, 25, 12, 12, WHITE);
+			}
+			else {
+				display.drawRect(33, 25, 12, 12, WHITE);
+			}
+			if (ROUTE[rt_sel].wissels & (1 << 3 - prg_wissels)) { //toon wisselstand
+				display.drawLine(72, 37, 88, 23, WHITE);
+			}
+			else {
+
+				display.drawLine(70, 32, 90, 32, WHITE);
+			}
+
+			buttons = 15;
+			break;
 		}
+
 		break;
+
 		//**********************LEVEL 4
 	case 4: //level 4
 			//Serial.print("PRG_level:");
@@ -1513,6 +1586,8 @@ void DSP_buttons(byte mode) {
 	case 4:
 		TXT(20); //pendel in stop
 		break;
+	case 5: //routes, instellen wissels
+		break;
 
 	case 10: //standaard programmeer balk
 		TXT(21);
@@ -1528,6 +1603,9 @@ void DSP_buttons(byte mode) {
 		break;
 	case 14: //routes instellen
 		TXT(28);
+		break;
+	case 15: //routes, wissels instellen
+		TXT(29);
 		break;
 	default:
 		break;
@@ -1591,7 +1669,7 @@ void TXT(byte t) {
 		display.print(F("S "));
 		break;
 	case 16:
-		display.print(F("Route"));
+		display.print(F("Route "));
 		break;
 		//***********Onderbalken
 	case 20:
@@ -1610,7 +1688,7 @@ void TXT(byte t) {
 		display.print(F(" -    -      -     X"));
 		break;
 	case 25:
-		display.print(F("loc   start   ?    F"));// PDL_fase = 0;
+		display.print(F("loc   start   X    F"));// PDL_fase = 0;
 		break;
 	case 26:
 		display.print(F("F0    F1    F2    I")); //PDL_fase =1
@@ -1619,7 +1697,10 @@ void TXT(byte t) {
 		display.print(F("<>   Vmin   Vmax   D")); //PDL_fase =1
 		break;
 	case 28:
-		display.print(F("R     SL     SR    V")); //PDL_fase =1
+		display.print(F("R     SL     SR    W")); //PDL_fase =1
+		break;
+	case 29:
+		display.print(F("W     *     <>     B")); //routes, instellen wissels
 		break;
 
 		//******************
