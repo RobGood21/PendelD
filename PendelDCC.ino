@@ -103,6 +103,7 @@ byte PRG_typeDCC; //actieve adres
 byte PRG_typeTest; //actieve test
 byte prg_wissels; //actieve wissel
 byte prg_sein; //actief sein 16x
+byte prg_blokkade;  //active blokkade, weke wordt er aangepast
 byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
@@ -228,19 +229,20 @@ void MEM_read() {
 		dcc_seinen = 252;
 		//EEPROM.update(103, dcc_seinen);
 	}
+	MEM_readroute();
+	//eerste vrij eeprom nu 132
+}
+
+void MEM_readroute() {
 	for (byte i = 0; i < 8; i++) {
 		ROUTE[i].stationl = EEPROM.read(108 + i);
 		ROUTE[i].stationr = EEPROM.read(116 + i);
 		ROUTE[i].wissels = EEPROM.read(124 + i); //let op default is 0xFF, dus false is bezet.....
+		ROUTE[i].blokkades = EEPROM.read(132 + i);//blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
+
 	}
-
-	//eerste vrij eeprom nu 132
-
-		//pos_melderDir[0] = EEPROM.read(104); //richting van de melders, hoog of laag actief default 0xFF;
-		//pos_melderDir[1] = EEPROM.read(105);
-		//default=0xFF 255
 }
 void MEM_loc_update(byte loc) {
 	//updates loc data 
@@ -251,6 +253,11 @@ void MEM_loc_update(byte loc) {
 	EEPROM.update(106, LOC[loc].Vmax);
 }
 void MEM_update() { //sets new values/ sends CV 
+
+	Serial.print("MEM_update PRG_fase=");
+	Serial.println(PRG_fase);
+
+
 	switch (PRG_fase) {
 	case 0: //DCC adressen
 		switch (PRG_typeDCC) {
@@ -305,6 +312,7 @@ void MEM_update() { //sets new values/ sends CV
 			EEPROM.update(108 + i, ROUTE[i].stationl);
 			EEPROM.update(116 + i, ROUTE[i].stationr);
 			EEPROM.update(124 + i, ROUTE[i].wissels);
+			EEPROM.update(132 + i, ROUTE[i].blokkades);
 		}
 		break;
 	}
@@ -316,6 +324,9 @@ void MEM_cancel() { //cancels, recalls value
 		break;
 	case 1: //loc2 adres
 		LOC[1].adres = EEPROM.read(101);
+		break;
+	case 4: //restore route data
+		MEM_readroute();
 		break;
 	}
 
@@ -987,7 +998,7 @@ void SW_PRG(byte sw) {
 		case 3:
 			switch (PRG_fase) {
 			case 4:
-				MEM_update();
+				//MEM_update();
 				PRG_level++;
 				//Serial.println(PRG_level);
 				break;
@@ -1079,7 +1090,7 @@ void SW_PRG(byte sw) {
 */
 			switch (PRG_fase) {
 			case 4:
-
+				PRG_level++; //naar level 4
 				break;
 			default:
 				PRG_level--;
@@ -1112,6 +1123,40 @@ void SW_PRG(byte sw) {
 				MEM_cancel;
 				break;
 			}
+			break;
+
+		case 4: //route instellen, seinen instellen
+			switch (sw) {
+			case 0:
+				break;
+			case 1:
+				break;
+			case 2:
+				break;
+			case 3:
+				PRG_level++; //naar level 5
+				break;
+			}
+			break;
+		}
+		break;
+	case 5: //route blokkades instellen
+		//alleen program fase 4, routes mogelijk. 14juni020
+		switch (sw) {
+		case 0:
+			prg_blokkade++;
+			if (prg_blokkade > 7)prg_blokkade = 0;
+			break;
+		case 1:
+			ROUTE[rt_sel].blokkades ^= (1 << prg_blokkade);
+			break;
+		case 2:
+			MEM_update();
+			PRG_level = 1;
+			break;
+		case 3: //annuleren invoer
+			PRG_level = 1;
+			MEM_cancel();
 			break;
 		}
 		break;
@@ -1509,7 +1554,7 @@ void DSP_prg() {
 		case 4: //routes wissels vastleggen
 			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(8);
 			regel2; display.print(prg_wissels + 1);
-			if (ROUTE[rt_sel].wissels & (1 << (7 - prg_wissels))) {
+			if (~ROUTE[rt_sel].wissels & (1 << (7 - prg_wissels))) { //wissel bezet als bit false is.
 				display.fillRect(33, 25, 12, 12, WHITE);
 			}
 			else {
@@ -1526,7 +1571,6 @@ void DSP_prg() {
 			buttons = 15;
 			break;
 		}
-
 		break;
 
 		//**********************LEVEL 4
@@ -1537,9 +1581,25 @@ void DSP_prg() {
 		case 3:
 			TXT_cv3(); TXT(200);
 			display.print(PRG_cvs[1]);
+			buttons = 10;
+			break;
+		case 4: //Route program, seinen instellen
+			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(9);
+			buttons = 16;
 			break;
 		}
-		buttons = 10;
+		break;
+		//************ Level 5
+	case 5:
+		cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(17);
+		regel2; display.print(prg_blokkade +1);
+		if (~ROUTE[rt_sel].blokkades & (1 << prg_blokkade)) { //if false bezet
+			display.fillRect(33, 25, 12, 12, WHITE);
+		}
+		else {
+			display.drawRect(33, 25, 12, 12, WHITE);
+		}
+		buttons = 17;
 		break;
 	}
 	DSP_buttons(buttons);
@@ -1607,6 +1667,12 @@ void DSP_buttons(byte mode) {
 	case 15: //routes, wissels instellen
 		TXT(29);
 		break;
+	case 16: //routes seinen instellen (false=groen)
+		TXT(19);
+		break;
+	case 17: //routes, blokkades instellen
+		TXT(18);
+		break;
 	default:
 		break;
 	}
@@ -1671,9 +1737,19 @@ void TXT(byte t) {
 	case 16:
 		display.print(F("Route "));
 		break;
+	case 17:
+		display.print(F("Blokkades "));
+		break;
 		//***********Onderbalken
+	case 18:
+		display.print(F("B     *      V     X"));  //keuze routes, seinen
+		break;
+
+	case 19:
+		display.print(F("<>     S     *     B"));  //keuze routes, seinen
+		break;
 	case 20:
-		display.print(F("loc   stop    ?    F")); //in gebruik??
+		display.print(F("loc   stop    ?    F"));
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
@@ -1700,7 +1776,7 @@ void TXT(byte t) {
 		display.print(F("R     SL     SR    W")); //PDL_fase =1
 		break;
 	case 29:
-		display.print(F("W     *     <>     B")); //routes, instellen wissels
+		display.print(F("W     *     <>     S")); //routes, instellen wissels
 		break;
 
 		//******************
