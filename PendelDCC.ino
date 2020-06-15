@@ -70,7 +70,12 @@ struct route {
 	byte blokkades;
 	//byte test3;
 
-} ROUTE[8];
+} ROUTE[12];
+//reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
+//rest van de locks altijd vrij bij starten.
+byte res_station;
+byte res_wissels;
+byte res_blok;
 
 //count tellers, 
 byte count_preample;
@@ -112,7 +117,7 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 byte PDL_fase;
 byte rt_sel;
 //temps
-
+byte tijdelijk;
 
 void setup() {
 	Serial.begin(9600);
@@ -230,15 +235,15 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_readroute();
-	//eerste vrij eeprom nu 132
+	//eerste vrij eeprom nu 156
 }
 
 void MEM_readroute() {
-	for (byte i = 0; i < 8; i++) {
-		ROUTE[i].stationl = EEPROM.read(108 + i);
-		ROUTE[i].stationr = EEPROM.read(116 + i);
-		ROUTE[i].wissels = EEPROM.read(124 + i); //let op default is 0xFF, dus false is bezet.....
-		ROUTE[i].blokkades = EEPROM.read(132 + i);//blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
+	for (byte i = 0; i < 12; i++) {
+		ROUTE[i].stationl = EEPROM.read(108 + i); //120
+		ROUTE[i].stationr = EEPROM.read(120 + i); //132
+		ROUTE[i].wissels = EEPROM.read(132 + i); // 144 let op default is 0xFF, dus false is bezet.....
+		ROUTE[i].blokkades = EEPROM.read(144 + i); //156 blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 
@@ -254,8 +259,8 @@ void MEM_loc_update(byte loc) {
 }
 void MEM_update() { //sets new values/ sends CV 
 
-	Serial.print("MEM_update PRG_fase=");
-	Serial.println(PRG_fase);
+//	Serial.print("MEM_update PRG_fase=");
+//	Serial.println(PRG_fase);
 
 
 	switch (PRG_fase) {
@@ -308,11 +313,11 @@ void MEM_update() { //sets new values/ sends CV
 	case 4: //Program fase 4 Routes
 		//nog aanpassen zodat alleen bij verlaten van update routes dit wordt gedaan...niet na iedere druk op knop 3
 
-		for (byte i; i < 8; i++) {
-			EEPROM.update(108 + i, ROUTE[i].stationl);
-			EEPROM.update(116 + i, ROUTE[i].stationr);
-			EEPROM.update(124 + i, ROUTE[i].wissels);
-			EEPROM.update(132 + i, ROUTE[i].blokkades);
+		for (byte i; i < 12; i++) {
+			EEPROM.update(108 + i, ROUTE[i].stationl); //120
+			EEPROM.update(120 + i, ROUTE[i].stationr); //132
+			EEPROM.update(132 + i, ROUTE[i].wissels); //144
+			EEPROM.update(144 + i, ROUTE[i].blokkades); //156
 		}
 		break;
 	}
@@ -419,7 +424,8 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte temp = 0;
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal=0x00;
+
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	//dit proces loopt alleen als loc.reg bit 0 = true
@@ -443,16 +449,16 @@ void LOC_exe() {
 				//start is dus altijd de loc van links naar rechts. Starten in een rechts eindblok is niet toegestaan
 
 				//eerst zoeken of er wel een route in deze richting is
-				for (byte i = 0; i < 8; i++) {
+				for (byte i = 0; i < 12; i++) {
 					if (LOC[loc].reg & (1 << 1)) {
-						if (ROUTE[i].stationr == LOC[loc].station)temp++;
+						if (ROUTE[i].stationr == LOC[loc].station)route++;
 					}
 					else {
-						if (ROUTE[i].stationl == LOC[loc].station)temp++;
+						if (ROUTE[i].stationl == LOC[loc].station)route++;
 					}
 				}
 
-				if (temp == 0) {
+				if (route == 0) {
 					if (LOC[loc].reg & (1 << 2)) { //ook in andere richting geen route
 						//geen route te vinden stoppen
 						LOC[loc].fase = 200;
@@ -471,33 +477,42 @@ void LOC_exe() {
 			case 5:
 				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
 				//LOC[loc].fase = 200; //tijdelijke stop proces
-				temp = random(0, 8);
-				Serial.println(temp);
+				route = random(0, 12); //12 mogelijke routes
 				//checken of random gekozen route akkoord is
-				//eerst richting, dirct doelstation vastleggen
+				//eerst richting, direct doelstation vastleggen
+				//LOC[loc].goal = 0;
 
-				LOC[loc].goal = 0;
 				if (LOC[loc].reg & (1 << 1)) { //l>R
-					if (ROUTE[temp].stationr == LOC[loc].station) LOC[loc].goal = ROUTE[temp].stationl;
+					if (ROUTE[route].stationr == LOC[loc].station) goal = ROUTE[route].stationl;
 				}
 				else { //R>L
-					if (ROUTE[temp].stationl == LOC[loc].station)LOC[loc].goal = ROUTE[temp].stationr;
+					if (ROUTE[route].stationl == LOC[loc].station) goal = ROUTE[route].stationr;
 				}
-				if (LOC[loc].goal > 0) {
-					//wissel enzo nog testen
-					//Serial.print("Doelstation: ");  Serial.println(LOC[loc].goal);
-					LOC[loc].fase = 10;
-				}
+				if (goal == 0)break; //uitspringen, geen route gevonden
+				Serial.println(goal);
+
+				//kijken of doelstation vrij is, anders switch verlaten
+				if (res_station & (1 << goal - 1)) break;
+				//doel station reserveren
+				res_station |= (1 << goal - 1); //goal 1 = bit 0
+				//wissel enzo nog testen
+
+				//route akkoord uitvoeren
+				LOC[loc].goal = goal;
+				LOC[loc].fase = 10;
 				break;
+
 			case 10: //drive
 				LOC[loc].velo = 3; LOC_calc(loc);
 				LOC[loc].fase = 15;
 				break;
 			case 15:
-				//test of doelstation is bereikt, temp is weer vrij
-				temp = MELDERS();
-				Serial.println(temp, BIN);
-				if (~temp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7
+				//test of doelstation is bereikt,  is weer vrij
+				tmp = MELDERS();
+				//Serial.println(tmp, BIN);
+				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7
+
+					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven
 
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
@@ -535,15 +550,17 @@ void LOC_exe() {
 							}
 							else { //melder bezet, station bekend
 								LOC[loc].station = i + 1;
+								res_station |= (1 << i); //block station
 								LOC[loc].velo = 0; LOC_calc(loc); //stop
 								LOC[loc].fase = 0;
+
 							}
 						}
 					}
 				}
 				break;
 			case 200:
-				Serial.println("stop");
+				//Serial.println("stop");
 				LOC[loc].reg &= ~(1 << 0); //stop
 				DSP_pendel();
 				break;
@@ -551,6 +568,8 @@ void LOC_exe() {
 		}
 		LOC[loc].count++;
 	}
+	if (tijdelijk != res_station)Serial.println(res_station, BIN);
+	tijdelijk = res_station;
 }
 byte MELDERS() {
 	byte melder;
@@ -688,7 +707,7 @@ void PRG_dec() {
 		switch (PRG_level) {
 		case 2: //route keuze
 			rt_sel++;
-			if (rt_sel > 7)rt_sel = 0;
+			if (rt_sel > 11)rt_sel = 0;
 			break;
 		case 3: //keuze wissel in route
 			prg_wissels++;
@@ -889,12 +908,13 @@ void MD_exe(byte md, boolean onoff) { ////NIET IN GEBRUIK!!!!
 	Waarschijnlijk beter om de pos_melder nibbles te testen bij bv.het zoeken van een vrij station,
 	en wanneer een loc rijd dus telkens even testen of het doelstation, blok bezet is.
 	Dender zal dan veel minder invloed hebben
-	*/
+
 	Serial.print("POsmelder0: "); Serial.print(pos_melders[0], BIN);
 	Serial.print(" "); Serial.print("Posmelder1: "); Serial.println(pos_melders[1], BIN);
 
 	Serial.print("Melder: "); Serial.print(md); Serial.print(" "); Serial.println(onoff);
 	if (PRG_fase == 1) DSP_prg();
+*/
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
@@ -1592,7 +1612,7 @@ void DSP_prg() {
 		//************ Level 5
 	case 5:
 		cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(17);
-		regel2; display.print(prg_blokkade +1);
+		regel2; display.print(prg_blokkade + 1);
 		if (~ROUTE[rt_sel].blokkades & (1 << prg_blokkade)) { //if false bezet
 			display.fillRect(33, 25, 12, 12, WHITE);
 		}
