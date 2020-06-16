@@ -54,8 +54,10 @@ struct LOC {
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
 	byte function; //functies
 	byte station; //welk station staat loc in
+	byte route; //welke route rijdt loc, ??? nodig???? 
 	byte goal; //welk station is loc onderweg
 	byte fase; //fase in pendel cyclus
+	byte teller; //universele teller, oa voor wissels instellen
 	int wait; //ingestelde wachttijd
 	unsigned int count;
 }LOC[2];
@@ -86,7 +88,6 @@ int count_slow;
 byte count_wa; //write adres
 byte count_command;
 byte count_locexe;
-
 byte dcc_fase;
 byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
 byte dcc_aantalBytes; //aantal bytes current van het DCC commando
@@ -117,7 +118,8 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 byte PDL_fase;
 byte rt_sel;
 //temps
-byte tijdelijk;
+byte temp_rss;
+byte temp_wis;
 
 void setup() {
 	Serial.begin(9600);
@@ -389,7 +391,8 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	dcc_aantalBytes = 2;
 	count_repeat = 4;
 	GPIOR0 |= (1 << 2); //start zenden accessoire	
-	//Serial.print("bytes: ");
+	
+   // Serial.print("bytes: ");
 	//Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
 }
 void DCC_accAdres(byte da) {
@@ -424,7 +427,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal=0x00;
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb;
 
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
@@ -476,12 +479,7 @@ void LOC_exe() {
 				break;
 			case 5:
 				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
-				//LOC[loc].fase = 200; //tijdelijke stop proces
 				route = random(0, 12); //12 mogelijke routes
-				//checken of random gekozen route akkoord is
-				//eerst richting, direct doelstation vastleggen
-				//LOC[loc].goal = 0;
-
 				if (LOC[loc].reg & (1 << 1)) { //l>R
 					if (ROUTE[route].stationr == LOC[loc].station) goal = ROUTE[route].stationl;
 				}
@@ -489,7 +487,7 @@ void LOC_exe() {
 					if (ROUTE[route].stationl == LOC[loc].station) goal = ROUTE[route].stationr;
 				}
 				if (goal == 0)break; //uitspringen, geen route gevonden
-				Serial.println(goal);
+				//Serial.println(goal);
 
 				//kijken of doelstation vrij is, anders switch verlaten
 				if (res_station & (1 << goal - 1)) break;
@@ -498,15 +496,38 @@ void LOC_exe() {
 				//wissel enzo nog testen
 
 				//route akkoord uitvoeren
+				LOC[loc].route = route;
 				LOC[loc].goal = goal;
+				LOC[loc].teller = 0;
 				LOC[loc].fase = 10;
+				LOC[loc].wait = 0;
 				break;
 
-			case 10: //drive
-				LOC[loc].velo = 3; LOC_calc(loc);
-				LOC[loc].fase = 15;
+			case 10: //set wissels
+				if (~ROUTE[LOC[loc].route].wissels & (1 << (7-LOC[loc].teller))) {  //bit 7~4 
+					//Serial.println("wissel");
+					res_wissels |= (1 << LOC[loc].teller); //reserveer wissel
+					tb = ROUTE[LOC[loc].route].wissels & (1 << (3-LOC[loc].teller));					
+					//Serial.print("tb: "); Serial.println(tb);
+					//Serial.print("ch: "); Serial.println(LOC[loc].teller);
+					//DCC_acc(false, true, LOC[loc].teller, !tb); //set wissel +1?		
+					DCC_acc(false, true, LOC[loc].teller,tb); //set wissel +1?						
+				}
+				LOC[loc].teller++;
+				if (LOC[loc].teller > 3) {
+					LOC[loc].teller = 0;
+					LOC[loc].fase = 20;
+					LOC[loc].wait = 10;
+				}
+
 				break;
-			case 15:
+
+			case 20: //drive
+				LOC[loc].wait = 0;
+				LOC[loc].velo = 5; LOC_calc(loc);
+				LOC[loc].fase = 25;
+				break;
+			case 25:
 				//test of doelstation is bereikt,  is weer vrij
 				tmp = MELDERS();
 				//Serial.println(tmp, BIN);
@@ -517,7 +538,7 @@ void LOC_exe() {
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].velo = 0; LOC_calc(loc);
-					LOC[loc].wait = 10;
+					LOC[loc].wait = 20;
 					LOC[loc].fase = 0;
 				}
 
@@ -568,8 +589,10 @@ void LOC_exe() {
 		}
 		LOC[loc].count++;
 	}
-	if (tijdelijk != res_station)Serial.println(res_station, BIN);
-	tijdelijk = res_station;
+	if (temp_rss != res_station) { Serial.print("res_stations: "); Serial.println(res_station, BIN); }
+	temp_rss = res_station;
+	if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
+	temp_wis = res_wissels;
 }
 byte MELDERS() {
 	byte melder;
@@ -1193,8 +1216,7 @@ void SW_pendel(byte sw) {
 	case 0:
 		switch (sw) {
 		case 0:
-			GPIOR0 ^= (1 << 7);
-			//LOC[0].speed = B01101110; //drive	
+			GPIOR0 ^= (1 << 7); //toggle loc keuze
 			break;
 		case 1:
 			LOC[loc].reg ^= (1 << 0); //toggle start/stop
@@ -1208,12 +1230,25 @@ void SW_pendel(byte sw) {
 			}
 			break;
 		case 2:
-			if (LOC[loc].reg & (1 << 0)) {
+			if (LOC[loc].reg & (1 << 0)) { //loc rijdt
 				//11juni nog geen functie
 			}
-			else {//wis stations
-				LOC[loc].station = 0;
-				LOC[loc].goal = 0;
+			else {//loc staat stil
+				//station kiezen
+				//stations vrij geven
+				if (LOC[loc].station > 0)res_station &= ~(1 << LOC[loc].station - 1);
+				if (LOC[loc].goal > 0)res_station &= ~(1 << LOC[loc].goal - 1);
+				LOC[loc].goal = 0; //wis doel en route
+				//wis geblokkeerde wissels?
+				//wis geblokkeerde blokkades?
+				LOC[loc].station++;
+				if (res_station & (1 << LOC[loc].station - 1)) LOC[loc].station++; //gereserveerde stations overslaan
+				if (LOC[loc].station > 8) {
+					LOC[loc].station = 1;
+					if (res_station & (1 << 0))LOC[loc].station = 2;
+				}
+				res_station |= (1 << LOC[loc].station - 1); //reserveer station
+
 			}
 			break;
 		case 3:
@@ -1784,7 +1819,7 @@ void TXT(byte t) {
 		display.print(F(" -    -      -     X"));
 		break;
 	case 25:
-		display.print(F("loc   start   X    F"));// PDL_fase = 0;
+		display.print(F("loc start station  F"));// PDL_fase = 0;
 		break;
 	case 26:
 		display.print(F("F0    F1    F2    I")); //PDL_fase =1
