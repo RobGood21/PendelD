@@ -5,6 +5,22 @@ PRG_level, hoe diep CV heeft bv 4 levels, adres loco1 maar 2 Parameter-value-lev
 
 PB3; PIN 11  is compare match register timer 2 gebruiken voor DCC output PIN
 
+LET OP! bits in de verschillende bytes verwijzen naar wissels als volgt:
+ROUTE[*].wissels (true=vrij, false is bezet)
+bit7 reserveer wissel1
+bit6 r... wissel2
+bit5 r... wissel3
+bit4 r..  wissel4
+bit3 richting wissel1
+bit2 ri. wissel2
+bit1 ri.wissel3
+bit0 ri.wissel4
+
+Voor res_wissel true is bezet, false is vrij
+res_wissel bit0 block wissel 1, bit 1 blok wissel 2, bit2 blok wissel 3, bit3 blok wissel4
+
+
+
 loc_reg
 zie struct
 
@@ -55,3 +71,16 @@ bit4
 bit5
 bit6 algemeen boolean binnen een void		
 bit7 algemeen boolean binnen een void, te gebruiken
+
+EEPROM adressen
+100 adres loc1
+101 adres loc2
+102 adres wissels
+103 adres seinen
+104 Vmin loc1
+105 Vmin Loc2
+106 Vmax loc1
+107 Vmax loc2
+108~155 data routes
+180 loc1 functions
+181 loc2 functions
