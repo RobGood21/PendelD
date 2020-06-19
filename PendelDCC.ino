@@ -46,18 +46,22 @@ struct LOC {
 	bit0 start, rijden true, stop false
 	bit1 relatieve richting rijdend naar rechts of rijdend naar links
 	bit2 tijdelijk bit geeft aan of er een route in de richting kan worden gekozen
+	bit3 Versnellen false, vertragen true
 	*/
 	byte Vmax;
 	byte Vmin;
 	byte adres; //DCC adres
 	byte speed; //Byte snelhed en richting
 	byte velo; //waarde 1~28 decimale voorstelling snelheid
+	byte vaart; //actuele snelheid stap
+	byte acc;//accelaratie
 	byte function; //functies
 	byte station; //welk station staat loc in
 	byte route; //welke route rijdt loc
 	byte goal; //welk station is loc onderweg
 	byte fase; //fase in pendel cyclus
 	byte teller; //universele teller, oa voor wissels instellen
+	byte slowcount; //hoe lang rijd loc in vmin
 	int wait; //ingestelde wachttijd
 	unsigned int count;
 }LOC[2];
@@ -70,7 +74,7 @@ struct route {
 	byte stationr;
 	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
 	byte blokkades;
-	//byte test3;
+	byte Vloc[2];
 
 } ROUTE[12];
 //reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
@@ -216,6 +220,7 @@ ISR(TIMER2_COMPA_vect) {
 	sei();
 }
 void MEM_read() {
+	byte a;
 	for (byte i = 0; i < 2; i++) {
 		LOC[i].adres = EEPROM.read(100 + i);
 		if (LOC[i].adres == 0xFF) {
@@ -228,8 +233,12 @@ void MEM_read() {
 		if (LOC[i].Vmin > 10)LOC[i].Vmin = 1;
 		LOC[i].Vmax = EEPROM.read(106 + i);
 		if (LOC[i].Vmax > 28)LOC[i].Vmax = 28;
-
-
+		//Vlocs, snelheid laden per route
+		for (byte y = 0; y < 12; y++) {
+			a = y; if (i == 1)a = a + 12;
+			ROUTE[y].Vloc[i] = EEPROM.read(200 + a);
+			if (ROUTE[y].Vloc[i] == 0xFF)ROUTE[y].Vloc[i] = 5;
+		}
 	}
 	dcc_wissels = EEPROM.read(102);
 	if (dcc_wissels == 0xFF) {
@@ -487,7 +496,7 @@ void LOC_exe() {
 			case 5:
 				//voorkomen 'deadlock' als treinen tegen elkaar staaan na lange tijd kijken of in andere richting een route is
 				LOC[loc].teller++;
-				if (LOC[loc].teller == 50) { //loc keren
+				if (LOC[loc].teller == 80) { //loc keren
 					LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
 					LOC[loc].reg |= (1 << 2);
 					LOC[loc].fase = 1; //opnieuw zoeken
@@ -495,7 +504,6 @@ void LOC_exe() {
 					LOC[loc].reg &= ~(1 << 2);
 					break; //uit de function gaan
 				}
-
 				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
 				route = random(0, 12); //12 mogelijke routes
 				if (LOC[loc].reg & (1 << 1)) { //l>R
@@ -504,12 +512,14 @@ void LOC_exe() {
 				else { //R>L
 					if (ROUTE[route].stationl == LOC[loc].station) goal = ROUTE[route].stationr;
 				}
-				if (goal == 0)break; //uitspringen, geen route gevonden
+
+				if (goal == 0) break; //uitspringen, geen route gevonden
 				//Serial.println(goal);
 
 				//check doelstation, anders switch verlaten
 				if (res_station & (1 << goal - 1)) break;
 				//check wissels
+
 				for (byte i = 0; i < 4; i++) {
 					if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
 						if (res_wissels & (1 << i))break; // wissel is bezet, verlaat proces
@@ -518,6 +528,7 @@ void LOC_exe() {
 				//check blokkades
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) { //false is bezet
+						Serial.println("check blokkade");
 						if (res_blok & (1 << i)) break; //als blokkade is bezet, verlaat proces
 					}
 				}
@@ -555,16 +566,33 @@ void LOC_exe() {
 				}
 				break;
 
-			case 20: //drive
+			case 20: //drive init
 				LOC[loc].wait = 0;
-				LOC[loc].velo = 5; LOC_calc(loc);
+				LOC[loc].velo = LOC[loc].Vmin; LOC_calc(loc);
+				LOC[loc].vaart = LOC[loc].velo;
 				LOC[loc].fase = 25;
+				LOC[loc].reg &= ~(1 << 3); //versnellen
+				LOC[loc].teller = 0;
+				LOC[loc].acc = 4;
+				LOC[loc].slowcount = 0;
 				break;
 			case 25:
 				//test of doelstation is bereikt,  is weer vrij
 				tmp = MELDERS();
 				//Serial.println(tmp, BIN);
-				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7
+
+				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt
+
+					//Vloc aanpassen...
+					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
+						if(LOC[loc].slowcount > 3) ROUTE[LOC[loc].route].Vloc[loc] ++;// = (LOC[loc].slowcount / 5) + ROUTE[LOC[loc].route].Vloc[loc];
+					}
+					else { //stopt, rijd te snel
+						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
+					}
+					//aanpassen in EEPROM
+					Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
+
 					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven					
 					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
 						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
@@ -577,6 +605,37 @@ void LOC_exe() {
 					LOC[loc].velo = 0; LOC_calc(loc);
 					LOC[loc].wait = 20;
 					LOC[loc].fase = 0;
+				}
+				else { //station niet bereikt, snelheid aanpassen
+					LOC[loc].teller++;
+					if (LOC[loc].teller > LOC[loc].acc) {
+						LOC[loc].teller = 0;
+
+						if (LOC[loc].reg & (1 << 3)) { //vertragen
+
+							if (LOC[loc].vaart > 1) LOC[loc].vaart--;//limit to 1
+							if (LOC[loc].velo > LOC[loc].Vmin) {
+								LOC[loc].velo--; LOC_calc(loc);
+							}
+							else { //rijd op mininmale snelheid meten hoelang
+								LOC[loc].slowcount++;
+							}
+						}
+						else { //versnellen
+							//Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
+							if (LOC[loc].vaart < 255) LOC[loc].vaart++; //limit
+							if (LOC[loc].vaart < ROUTE[LOC[loc].route].Vloc[loc]) {
+								//versnellen
+								if (LOC[loc].vaart < LOC[loc].Vmax) {
+									LOC[loc].velo++; LOC_calc(loc);
+								}
+							}
+							else { //omschakelen naar vertragen
+								LOC[loc].reg |= (1 << 3);
+								LOC[loc].acc = 8;
+							}
+						}
+					}
 				}
 
 				break;

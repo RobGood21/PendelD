@@ -84,3 +84,4 @@ EEPROM adressen
 108~155 data routes
 180 loc1 functions
 181 loc2 functions
+200~223 Vloc, snelheid per route/loc
