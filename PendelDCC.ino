@@ -521,14 +521,15 @@ void LOC_exe() {
 				//check wissels
 
 				for (byte i = 0; i < 4; i++) {
-					if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
+					if (~ROUTE[route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
+						//Serial.println("check wissels");
 						if (res_wissels & (1 << i))break; // wissel is bezet, verlaat proces
 					}
 				}
 				//check blokkades
 				for (byte i = 0; i < 8; i++) {
-					if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) { //false is bezet
-						Serial.println("check blokkade");
+					if (~ROUTE[route].blokkades & (1 << i)) {
+						//Serial.println("check blokkade");
 						if (res_blok & (1 << i)) break; //als blokkade is bezet, verlaat proces
 					}
 				}
@@ -580,31 +581,8 @@ void LOC_exe() {
 				//test of doelstation is bereikt,  is weer vrij
 				tmp = MELDERS();
 				//Serial.println(tmp, BIN);
-
 				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt
-
-					//Vloc aanpassen...
-					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
-						if(LOC[loc].slowcount > 3) ROUTE[LOC[loc].route].Vloc[loc] ++;// = (LOC[loc].slowcount / 5) + ROUTE[LOC[loc].route].Vloc[loc];
-					}
-					else { //stopt, rijd te snel
-						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
-					}
-					//aanpassen in EEPROM
-					Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
-
-					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven					
-					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
-						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
-					}
-					for (byte i = 0; i < 8; i++) {//blokkades vrijgeven
-						if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok &= ~(1 << i);
-					}
-					LOC[loc].station = LOC[loc].goal;
-					LOC[loc].goal = 0;
-					LOC[loc].velo = 0; LOC_calc(loc);
-					LOC[loc].wait = 20;
-					LOC[loc].fase = 0;
+					LOC[loc].fase = 30;
 				}
 				else { //station niet bereikt, snelheid aanpassen
 					LOC[loc].teller++;
@@ -639,6 +617,64 @@ void LOC_exe() {
 				}
 
 				break;
+			case 30: //eerste test melders was positief
+				tmp = MELDERS(); //2e x melders testen om spikes uit te vangen
+				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt				
+
+				//Vloc aanpassen...
+					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
+						if (LOC[loc].slowcount > 3) ROUTE[LOC[loc].route].Vloc[loc] ++;// = (LOC[loc].slowcount / 5) + ROUTE[LOC[loc].route].Vloc[loc];
+					}
+					else { //stopt, rijd te snel
+						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
+					}
+					//restsnelheid bepalen, doorrijden
+					tmp = LOC[loc].velo - LOC[loc].Vmin;
+					Serial.println(tmp);
+					switch (tmp) {
+					case 0:
+						LOC[loc].wait = 10;
+						break;
+					case 1:
+						LOC[loc].wait = 5;
+						break;
+					case 2:
+						LOC[loc].wait = 1;
+						break;
+
+					default:
+					tmp = 0;
+					LOC[loc].wait = 0;
+						LOC[loc].velo = 0; LOC_calc(loc);
+						break;
+					}
+					
+					//aanpassen in EEPROM
+					//Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
+					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven					
+					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
+						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
+					}
+					for (byte i = 0; i < 8; i++) {//blokkades vrijgeven
+						if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok &= ~(1 << i);
+					}
+					LOC[loc].station = LOC[loc].goal;
+					LOC[loc].goal = 0;
+					LOC[loc].fase = 35;
+
+				}
+				else {
+					LOC[loc].fase = 25; //opnieuw testen
+				}
+				break;
+
+			case 35:
+				//stop locomotief
+				LOC[loc].velo = 0; LOC_calc(loc);
+				LOC[loc].fase = 0;
+				LOC[loc].wait = 10; //station wachttijd
+				break;
+
 			case 101: //begin find starting point (station)
 				//LOC[loc].wait = 5; //timing testen melders
 				//zorg dat de andere loc niet rijdt
@@ -689,8 +725,8 @@ void LOC_exe() {
 	//temp_rss = res_station;
 	//if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
 	//temp_wis = res_wissels;
-	if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
-	temp_blok = res_blok;
+	//if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
+	//temp_blok = res_blok;
 }
 byte MELDERS() {
 	byte melder;
