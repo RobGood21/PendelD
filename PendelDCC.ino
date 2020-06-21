@@ -74,7 +74,9 @@ struct route {
 	byte stationr;
 	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
 	byte blokkades;
+	byte melders; //melders die niet bezet mogen zijn in een route (stations die worden overgeslagen, kan een loc op staan)
 	byte Vloc[2];
+
 
 } ROUTE[12];
 //reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
@@ -251,7 +253,7 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_readroute();
-	//eerste vrij eeprom nu 156
+
 }
 
 void MEM_readroute() { //zie beschrijving
@@ -260,6 +262,7 @@ void MEM_readroute() { //zie beschrijving
 		ROUTE[i].stationr = EEPROM.read(120 + i); //132
 		ROUTE[i].wissels = EEPROM.read(132 + i); // 144 let op default is 0xFF, dus false is bezet.....
 		ROUTE[i].blokkades = EEPROM.read(144 + i); //156 blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
+		ROUTE[i].melders = EEPROM.read(156 + 1);
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 
@@ -496,7 +499,7 @@ void LOC_exe() {
 			case 5:
 				//voorkomen 'deadlock' als treinen tegen elkaar staaan na lange tijd kijken of in andere richting een route is
 				LOC[loc].teller++;
-				if (LOC[loc].teller == 80) { //loc keren
+				if (LOC[loc].teller == 100) { //loc keren
 					LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
 					LOC[loc].reg |= (1 << 2);
 					LOC[loc].fase = 1; //opnieuw zoeken
@@ -516,23 +519,31 @@ void LOC_exe() {
 				if (goal == 0) break; //uitspringen, geen route gevonden
 				//Serial.println(goal);
 
+				tmp = 0;
 				//check doelstation, anders switch verlaten
-				if (res_station & (1 << goal - 1)) break;
+				if (res_station & (1 << goal - 1)) tmp = 1;
 				//check wissels
 
 				for (byte i = 0; i < 4; i++) {
 					if (~ROUTE[route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
 						//Serial.println("check wissels");
-						if (res_wissels & (1 << i))break; // wissel is bezet, verlaat proces
+						if (res_wissels & (1 << i))tmp = 1; // wissel is bezet, verlaat proces
 					}
 				}
-				//check blokkades
+				//check blokkades en melders die niet bezet mogen zijn
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) {
-						//Serial.println("check blokkade");
-						if (res_blok & (1 << i)) break; //als blokkade is bezet, verlaat proces
+						Serial.println("check blokkade");
+						if (res_blok & (1 << i)) tmp = 1; //als blokkade is bezet, verlaat proces
+					}
+					if (~ROUTE[route].melders & (1 << 1)) {
+						//check melders gebruik van changed is nu vrij (hoop ik)
+						changed = MELDERS();
+						if (~changed & (1 << i))tmp = 1; //if false dan bezet
 					}
 				}
+				if (tmp == 1)break;
+
 				//doel station reserveren
 				res_station |= (1 << goal - 1); //goal 1 = bit 0
 				//route akkoord uitvoeren
@@ -628,27 +639,25 @@ void LOC_exe() {
 					else { //stopt, rijd te snel
 						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
 					}
-					//restsnelheid bepalen, doorrijden
-					tmp = LOC[loc].velo - LOC[loc].Vmin;
-					Serial.println(tmp);
-					switch (tmp) {
-					case 0:
-						LOC[loc].wait = 10;
-						break;
+					//restsnelheid bepalen, doorrijden					
+					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 5;
+						LOC[loc].wait = 6;
 						break;
 					case 2:
+						LOC[loc].wait = 3;
+						break;
+					case 3:
 						LOC[loc].wait = 1;
 						break;
 
 					default:
-					tmp = 0;
-					LOC[loc].wait = 0;
+						tmp = 0;
+						LOC[loc].wait = 0;
 						LOC[loc].velo = 0; LOC_calc(loc);
 						break;
 					}
-					
+
 					//aanpassen in EEPROM
 					//Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
 					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven					
@@ -721,12 +730,12 @@ void LOC_exe() {
 		}
 		LOC[loc].count++;
 	}
-	//if (temp_rss != res_station) { Serial.print("res_stations: "); Serial.println(res_station, BIN); }
-	//temp_rss = res_station;
-	//if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
-	//temp_wis = res_wissels;
-	//if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
-	//temp_blok = res_blok;
+	if (temp_rss != res_station) { Serial.print("res_stations: "); Serial.println(res_station, BIN); }
+	temp_rss = res_station;
+	if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
+	temp_wis = res_wissels;
+	if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
+	temp_blok = res_blok;
 }
 byte MELDERS() {
 	byte melder;
@@ -1322,10 +1331,15 @@ void SW_PRG(byte sw) {
 		switch (sw) {
 		case 0:
 			prg_blokkade++;
-			if (prg_blokkade > 7)prg_blokkade = 0;
+			if (prg_blokkade > 15)prg_blokkade = 0;
 			break;
 		case 1:
-			ROUTE[rt_sel].blokkades ^= (1 << prg_blokkade);
+			if (prg_blokkade < 8) {
+				ROUTE[rt_sel].blokkades ^= (1 << prg_blokkade);
+			}
+			else {
+				ROUTE[rt_sel].melders ^= (1 << prg_blokkade - 8);
+			}
 			break;
 		case 2:
 			MEM_update();
@@ -1779,13 +1793,26 @@ void DSP_prg() {
 		break;
 		//************ Level 5
 	case 5:
-		cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(17);
-		regel2; display.print(prg_blokkade + 1);
-		if (~ROUTE[rt_sel].blokkades & (1 << prg_blokkade)) { //if false bezet
-			display.fillRect(33, 25, 12, 12, WHITE);
+		cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200);
+		if (prg_blokkade < 8) { //blokkades
+			TXT(17);
+			regel2; display.print(prg_blokkade + 1);
+			if (~ROUTE[rt_sel].blokkades & (1 << prg_blokkade)) { //if false bezet
+				display.fillRect(33, 25, 12, 12, WHITE);
+			}
+			else {
+				display.drawRect(33, 25, 12, 12, WHITE);
+			}
 		}
-		else {
-			display.drawRect(33, 25, 12, 12, WHITE);
+		else { //melders
+			TXT(3);
+			regel2; display.print(prg_blokkade -7);
+			if (~ROUTE[rt_sel].melders & (1 << prg_blokkade-8)) { //if false bezet
+				display.fillRect(33, 25, 12, 12, WHITE);
+			}
+			else {
+				display.drawRect(33, 25, 12, 12, WHITE);
+			}
 		}
 		buttons = 17;
 		break;
@@ -1930,11 +1957,11 @@ void TXT(byte t) {
 		break;
 		//***********Onderbalken
 	case 18:
-		display.print(F("B     *      V     X"));  //keuze routes, seinen
+		display.print(F("B/M    *     V     X"));  //keuze routes, seinen
 		break;
 
 	case 19:
-		display.print(F("<>     S     *     B"));  //keuze routes, seinen
+		display.print(F("<>    S     *    B/M"));  //keuze routes, seinen
 		break;
 	case 20:
 		display.print(F("loc   stop    ?    F"));
