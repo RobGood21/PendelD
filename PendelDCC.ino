@@ -10,17 +10,10 @@
 
 //libraries
 #include <EEPROM.h>
-
 //display 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-//#define SCREEN_WIDTH 128 // OLED display width, in pixels
-//#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-
-//constanten
-#define prgmax 4 //aantal programma fases(+1), verhogen bij toevoegen prgfase
-
 //teksten
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
@@ -28,19 +21,13 @@
 #define regel3 DSP_settxt(10,23,2) //value tweede regel groot
 #define regel1s DSP_settxt(0, 2, 1) //value eerste regel klein
 #define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
-
-//#define txt_dcc "DCC adres " 
-//#define txt_lok "loco " 
-
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-
 #define TrueBit OCR2A = 115
 #define FalseBit OCR2A = 230
 
 //declarations, 
 //struct's
 struct LOC {
-	//strucs max 7 bytes anders crashed alles
 	byte reg;
 	/*
 	bit0 start, rijden true, stop false
@@ -67,7 +54,7 @@ struct LOC {
 }LOC[2];
 
 struct route {
-	byte reg; //registers
+	//byte reg; //registers
 	/*bit0 richting.... ?????   nodig??
 	*/
 	byte stationl;
@@ -76,15 +63,12 @@ struct route {
 	byte blokkades;
 	byte melders; //melders die niet bezet mogen zijn in een route (stations die worden overgeslagen, kan een loc op staan)
 	byte Vloc[2];
-
-
 } ROUTE[12];
 //reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
 //rest van de locks altijd vrij bij starten.
 byte res_station;
 byte res_wissels;
 byte res_blok;
-
 //count tellers, 
 byte count_preample;
 byte count_byte;
@@ -124,9 +108,9 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 byte PDL_fase;
 byte rt_sel;
 //temps 
-byte temp_rss;
-byte temp_blok;
-byte temp_wis;
+//byte temp_rss;
+//byte temp_blok;
+//byte temp_wis;
 
 void setup() {
 	Serial.begin(9600);
@@ -255,7 +239,6 @@ void MEM_read() {
 	MEM_readroute();
 
 }
-
 void MEM_readroute() { //zie beschrijving
 	for (byte i = 0; i < 12; i++) {
 		ROUTE[i].stationl = EEPROM.read(108 + i); //120
@@ -499,7 +482,7 @@ void LOC_exe() {
 			case 5:
 				//voorkomen 'deadlock' als treinen tegen elkaar staaan na lange tijd kijken of in andere richting een route is
 				LOC[loc].teller++;
-				if (LOC[loc].teller == 100) { //loc keren
+				if (LOC[loc].teller > 150) { //loc keren
 					LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
 					LOC[loc].reg |= (1 << 2);
 					LOC[loc].fase = 1; //opnieuw zoeken
@@ -536,14 +519,13 @@ void LOC_exe() {
 						Serial.println("check blokkade");
 						if (res_blok & (1 << i)) tmp = 1; //als blokkade is bezet, verlaat proces
 					}
-					if (~ROUTE[route].melders & (1 << 1)) {
+					if (~ROUTE[route].melders & (1 << i)) {
 						//check melders gebruik van changed is nu vrij (hoop ik)
 						changed = MELDERS();
 						if (~changed & (1 << i))tmp = 1; //if false dan bezet
 					}
 				}
 				if (tmp == 1)break;
-
 				//doel station reserveren
 				res_station |= (1 << goal - 1); //goal 1 = bit 0
 				//route akkoord uitvoeren
@@ -642,10 +624,10 @@ void LOC_exe() {
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 6;
+						LOC[loc].wait = 5;
 						break;
 					case 2:
-						LOC[loc].wait = 3;
+						LOC[loc].wait = 2;
 						break;
 					case 3:
 						LOC[loc].wait = 1;
@@ -730,12 +712,12 @@ void LOC_exe() {
 		}
 		LOC[loc].count++;
 	}
-	if (temp_rss != res_station) { Serial.print("res_stations: "); Serial.println(res_station, BIN); }
-	temp_rss = res_station;
-	if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
-	temp_wis = res_wissels;
-	if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
-	temp_blok = res_blok;
+	//if (temp_rss != res_station) { Serial.print("res_stations: "); Serial.println(res_station, BIN); }
+	//temp_rss = res_station;
+	//if (temp_wis != res_wissels) { Serial.print("res_wissels: "); Serial.println(res_wissels, BIN); }
+	//temp_wis = res_wissels;
+	//if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
+	//temp_blok = res_blok;
 }
 byte MELDERS() {
 	byte melder;
@@ -1131,11 +1113,11 @@ void SW_PRG(byte sw) {
 		switch (sw) {
 		case 0:
 			PRG_fase--;
-			if (PRG_fase > prgmax)PRG_fase = prgmax;
+			if (PRG_fase > 4)PRG_fase = 4;
 			break;
 		case 1:
 			PRG_fase++;
-			if (PRG_fase > prgmax)PRG_fase = 0;
+			if (PRG_fase > 4)PRG_fase = 0;
 			break;
 		case 2:
 			PRG_level++;
@@ -1149,7 +1131,6 @@ void SW_PRG(byte sw) {
 			break;
 		}
 		break;
-
 		///++++++++LEVEL2
 	case 2: //Level 2
 		switch (sw) {
@@ -1180,7 +1161,6 @@ void SW_PRG(byte sw) {
 				break;
 			}
 			break;
-
 		case 3:
 			switch (PRG_fase) {
 			case 4:
@@ -1244,14 +1224,11 @@ void SW_PRG(byte sw) {
 					//Serial.print("poort: "); Serial.println(bitRead(GPIOR1,6));
 
 					DCC_acc(true, true, prg_sein, GPIOR1 & (1 << 6));
-
 					break;
 				case 4://melders
 					break;
 				}
-
 				break;
-
 			case 3: //CV programmering
 				PRG_level++;
 				break;
@@ -1262,18 +1239,7 @@ void SW_PRG(byte sw) {
 				break;
 			}
 			break;
-
 		case 3: //switch 3, level 3
-
-			//loc stoppen?? Waarom? Voor handbediening beter niet...weggehaald 12juni2020
-
-			/*
-
-			if (PRG_typeTest < 2) {
-				LOC[PRG_typeTest].velo = 0;
-				LOC_calc(PRG_typeTest);
-			}
-*/
 			switch (PRG_fase) {
 			case 4:
 				PRG_level++; //naar level 4
@@ -1283,8 +1249,6 @@ void SW_PRG(byte sw) {
 				MEM_cancel();
 				break;
 			}
-
-
 			break;
 		}
 		break;
