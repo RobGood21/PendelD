@@ -113,6 +113,7 @@ byte rt_sel;
 //byte temp_wis;
 
 void setup() {
+	delay(2000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
@@ -140,7 +141,7 @@ void setup() {
 
 	//Serial.println(PINC);
 	if (PINC == 54)Factory();
-
+	GPIOR1 &= ~(1 << 4);
 	MEM_read();
 	//init
 	LOC[0].speed = B01100000;
@@ -202,7 +203,7 @@ ISR(TIMER2_COMPA_vect) {
 	}
 
 	//check for short
-	if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
+	//if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
 	sei();
 }
 void MEM_read() {
@@ -245,7 +246,7 @@ void MEM_readroute() { //zie beschrijving
 		ROUTE[i].stationr = EEPROM.read(120 + i); //132
 		ROUTE[i].wissels = EEPROM.read(132 + i); // 144 let op default is 0xFF, dus false is bezet.....
 		ROUTE[i].blokkades = EEPROM.read(144 + i); //156 blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
-		ROUTE[i].melders = EEPROM.read(156 + 1);
+		ROUTE[i].melders = EEPROM.read(156 + i);
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 
@@ -262,12 +263,9 @@ void MEM_loc_update(byte loc) {
 	EEPROM.update(number, LOC[loc].function);
 }
 void MEM_update() { //sets new values/ sends CV 
-
-//	Serial.print("MEM_update PRG_fase=");
+	//	Serial.print("MEM_update PRG_fase=");
 //	Serial.println(PRG_fase);
-
-
-	switch (PRG_fase) {
+		switch (PRG_fase) {
 	case 0: //DCC adressen
 		switch (PRG_typeDCC) {
 		case 0: //loc1
@@ -322,6 +320,7 @@ void MEM_update() { //sets new values/ sends CV
 			EEPROM.update(120 + i, ROUTE[i].stationr); //132
 			EEPROM.update(132 + i, ROUTE[i].wissels); //144
 			EEPROM.update(144 + i, ROUTE[i].blokkades); //156
+			EEPROM.update(156 + i, ROUTE[i].melders);//168
 		}
 		break;
 	}
@@ -521,8 +520,8 @@ void LOC_exe() {
 					}
 					if (~ROUTE[route].melders & (1 << i)) {
 						//check melders gebruik van changed is nu vrij (hoop ik)
-						changed = MELDERS();
-						if (~changed & (1 << i))tmp = 1; //if false dan bezet
+						//changed = MELDERS();
+						if (res_station & (1 << i))tmp = 1; //if false dan bezet
 					}
 				}
 				if (tmp == 1)break;
@@ -718,6 +717,20 @@ void LOC_exe() {
 	//temp_wis = res_wissels;
 	//if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
 	//temp_blok = res_blok;
+}
+void INIT_wissels() {
+	//initialiseert de aangesloten wissels en seinen, false is wissels
+	//wissels, gebruiken PRG_wissels ... kan problemen geven door dubbel gebruik
+	if (~GPIOR0 & (1 << 2)) { //als verwerken vorige DCC commando klaar is
+		//Serial.println(prg_wissels);
+		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
+		GPIOR1 ^= (1 << 6);
+		if (~GPIOR1 & (1 << 6))prg_wissels++;
+		if (prg_wissels > 4) {
+			prg_wissels = 0;
+			GPIOR1 |= (1 << 4); //exit wissel init
+		}
+	}
 }
 byte MELDERS() {
 	byte melder;
@@ -1770,8 +1783,8 @@ void DSP_prg() {
 		}
 		else { //melders
 			TXT(3);
-			regel2; display.print(prg_blokkade -7);
-			if (~ROUTE[rt_sel].melders & (1 << prg_blokkade-8)) { //if false bezet
+			regel2; display.print(prg_blokkade - 7);
+			if (~ROUTE[rt_sel].melders & (1 << prg_blokkade - 8)) { //if false bezet
 				display.fillRect(33, 25, 12, 12, WHITE);
 			}
 			else {
@@ -1994,6 +2007,10 @@ void TXT(byte t) {
 void loop() {	//slow events timer
 	count_slow++;
 	if (count_slow > 12000) {
+
+		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
+
+
 		//12000 is hoe snel de commandoos elkaar opvolgen vooral lange commandoos als CV accessoires
 		//bij 10000 werk dit niet misschien nog wat fine tunen...
 		count_slow = 0;
@@ -2002,7 +2019,12 @@ void loop() {	//slow events timer
 		//start DCC command transmit
 		count_locexe++;
 		if (count_locexe > 10) {
-			LOC_exe();
+			if (GPIOR1 & (1 << 4)) {
+				LOC_exe();
+			}
+			else {
+				INIT_wissels();
+			}
 			count_locexe = 0;
 		}
 		if (GPIOR1 & (1 << 0))DCC_write(); //writing dcc adres in loc
