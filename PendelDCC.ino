@@ -108,7 +108,7 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 byte PDL_fase;
 byte rt_sel;
 //temps 
-//byte temp_rss;
+byte temp_rss;
 //byte temp_blok;
 //byte temp_wis;
 
@@ -238,7 +238,6 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_readroute();
-
 }
 void MEM_readroute() { //zie beschrijving
 	for (byte i = 0; i < 12; i++) {
@@ -249,7 +248,6 @@ void MEM_readroute() { //zie beschrijving
 		ROUTE[i].melders = EEPROM.read(156 + i);
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
-
 	}
 }
 void MEM_loc_update(byte loc) {
@@ -265,7 +263,7 @@ void MEM_loc_update(byte loc) {
 void MEM_update() { //sets new values/ sends CV 
 	//	Serial.print("MEM_update PRG_fase=");
 //	Serial.println(PRG_fase);
-		switch (PRG_fase) {
+	switch (PRG_fase) {
 	case 0: //DCC adressen
 		switch (PRG_typeDCC) {
 		case 0: //loc1
@@ -428,7 +426,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb;
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a=0;
 
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
@@ -515,7 +513,7 @@ void LOC_exe() {
 				//check blokkades en melders die niet bezet mogen zijn
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) {
-						Serial.println("check blokkade");
+						//Serial.println("check blokkade");
 						if (res_blok & (1 << i)) tmp = 1; //als blokkade is bezet, verlaat proces
 					}
 					if (~ROUTE[route].melders & (1 << i)) {
@@ -531,17 +529,14 @@ void LOC_exe() {
 				LOC[loc].route = route;
 				LOC[loc].goal = goal;
 				LOC[loc].teller = 0;
-				LOC[loc].fase = 8;
-				LOC[loc].wait = 0;
-				break;
-
-			case 8: //reserveer blokkades
-				for (byte i = 0; i < 8; i++) {
-					if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok |= (1 << i);
-				}
 				LOC[loc].fase = 10;
+				LOC[loc].wait = 0;
+				//reserveer blokkades en melders(stations)
+				for (byte i = 0; i < 8; i++) {
+					if (~ROUTE[route].blokkades & (1 << i)) res_blok |= (1 << i);
+					if (~ROUTE[route].melders & (1 << i)) res_station |= (1 << i);
+				}
 				break;
-
 			case 10: //set wissels
 				if (~ROUTE[LOC[loc].route].wissels & (1 << (7 - LOC[loc].teller))) {  //bit 7~4 
 					//Serial.println("wissel");
@@ -614,12 +609,26 @@ void LOC_exe() {
 				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt				
 
 				//Vloc aanpassen...
+					GPIOR1 &= ~(1 << 7); //use temp boolean
 					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
-						if (LOC[loc].slowcount > 3) ROUTE[LOC[loc].route].Vloc[loc] ++;// = (LOC[loc].slowcount / 5) + ROUTE[LOC[loc].route].Vloc[loc];
+						if (LOC[loc].slowcount > 3) {
+							ROUTE[LOC[loc].route].Vloc[loc] ++;// = (LOC[loc].slowcount / 5) + ROUTE[LOC[loc].route].Vloc[loc];
+							GPIOR1 |= (1 << 7);
+						}
 					}
 					else { //stopt, rijd te snel
 						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
+						GPIOR1 |= (1 << 7);
 					}
+					if (GPIOR1 & (1 << 7)) {
+					//snelheidverschil groot, nieuwe routetijd opslaan in EEPROM
+					Serial.println("opslaan");
+					a = 200 + LOC[loc].route;
+					if (loc == 1)a = a + 12;
+					EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
+					}
+					GPIOR1 &= ~(1 << 7); //release temp boolean
+
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
@@ -641,13 +650,17 @@ void LOC_exe() {
 
 					//aanpassen in EEPROM
 					//Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
-					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven					
+					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven		
+
+					//Serial.println(res_station,BIN);
 					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
 						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
 					}
-					for (byte i = 0; i < 8; i++) {//blokkades vrijgeven
+					for (byte i = 0; i < 8; i++) {//blokkades en gemelde stations vrijgeven
 						if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok &= ~(1 << i);
+						if (~ROUTE[LOC[loc].route].melders & (1 << i))res_station &= ~(1 << i);
 					}
+
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].fase = 35;
