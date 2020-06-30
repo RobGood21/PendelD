@@ -84,7 +84,6 @@ byte dcc_aantalBytes; //aantal bytes current van het DCC commando
 byte sw_statusC; //laatste stand van switches op C port
 byte sw_statusD; //D port
 byte loc_ta; //temp loc adres nodig in CV adres programming
-//byte loc_function[2]; //moet van EEPROM komen
 byte dcc_wissels; //dcc basis adres wissel decoder 
 byte dcc_seinen; //dcc basis adres sein decoder
 byte pos_wissels; //stand positie van de vier wissels
@@ -103,20 +102,17 @@ byte prg_blokkade;  //active blokkade, weke wordt er aangepast
 byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
-
 //pendel mode
 byte PDL_fase;
 byte rt_sel;
 //temps 
-byte temp_rss;
+//byte temp_rss;
 //byte temp_blok;
 //byte temp_wis;
-
 void setup() {
-	delay(2000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
+	delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
@@ -129,31 +125,25 @@ void setup() {
 	sw_statusC = 0xFF;
 	sw_statusD = 0xFF;
 	//interrupt register settings
-	//TCCR2A – Timer/Counter Control Register A
+	//TCCR2A – Timer/Counter Control Register A, timer 2 used for generate DCC pulses
 	TCCR2A = 0x00; //clear register
 	TCCR2A |= (1 << 6);//Toggle OC2A on Compare Match
 	TCCR2A |= (1 << 1); //CTC mode clear timer at compare match
 	TCCR2B = 2; //set register timer 2 prescaler 8
 	TIMSK2 |= (1 << 1);
 	PORTB |= (1 << 0); //set pin8 high
-	 //functies = B10000000;
-	//DSP_start();
-
-	//Serial.println(PINC);
-	if (PINC == 54)Factory();
+	if (PINC == 54)Factory(); //holding button 1 and 4 starts EEPROM reset
 	GPIOR1 &= ~(1 << 4);
 	MEM_read();
 	//init
-	LOC[0].speed = B01100000;
+	LOC[0].speed = B01100000; //set start direction forward of locomotive
 	LOC[1].speed = B01100000;
-	//LOC[0].function = 128;
-	//LOC[1].function = 128;
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	DSP_pendel();
 }
 void Factory() {
 	//resets EEPROM to default
-	for (byte i = 100; i < 200; i++) {
+	for (byte i = 100; i < 300; i++) {
 		EEPROM.update(i, 0xFF);
 	}
 }
@@ -426,30 +416,19 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a=0;
-
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
-	//dit proces loopt alleen als loc.reg bit 0 = true
-	if (LOC[loc].reg & (1 << 0)) {
-
-		if (LOC[loc].wait < LOC[loc].count) {
+	if (LOC[loc].reg & (1 << 0)) {//dit proces loopt alleen als loc.reg bit 0 = true
+		if (LOC[loc].wait < LOC[loc].count) { //wacht cyclus, meerdere plaatsen aan te roepen door wait > 0 te maken
 			LOC[loc].count = 0; //reset clock
-
 			switch (LOC[loc].fase) {
-			case 0: //waiting in station
-				if (LOC[loc].station == 0)LOC[loc].fase = 100;
+			case 0: //start cyclus, staat loc staat in beginstation
+				if (LOC[loc].station == 0)LOC[loc].fase = 100; //geen beginstation gedefinieerd, systeem probeert station te vinden
 				LOC[loc].fase++;
 				LOC[loc].wait = 0;
 				break;
-			case 1: //begin route zoeken
-				//een relatieve rijrichting is hier nodig, dit is de absolute richting waarin de loc 
-				//dit station heeft bereikt in combinatie met het vinden van het beginstation door verlaten of door bereiken
-				//het verlaten van een station moet de relatieve richting omzetten. reg. bit1 
-				//false =links rechts; true = rechts links
-				//handmatig omzetten van richting zet relatieve richting NIET om 
-				//start is dus altijd de loc van links naar rechts. Starten in een rechts eindblok is niet toegestaan
-
+			case 1: //route zoeken
 				//eerst zoeken of er wel een route in deze richting is
 				for (byte i = 0; i < 12; i++) {
 					if (LOC[loc].reg & (1 << 1)) {
@@ -459,17 +438,14 @@ void LOC_exe() {
 						if (ROUTE[i].stationl == LOC[loc].station)route++;
 					}
 				}
-
 				if (route == 0) {
 					if (LOC[loc].reg & (1 << 2)) { //ook in andere richting geen route
-						//geen route te vinden stoppen
-						LOC[loc].fase = 200;
+						LOC[loc].fase = 200;//geen route mogelijk
 					}
-					else { //richting aanpassen opnieuw testen
+					else { //richting wisselen opnieuw testen
 						LOC[loc].speed ^= (1 << 5); LOC[loc].reg ^= (1 << 1);
 						LOC[loc].reg |= (1 << 2);
 					}
-					//Serial.println("geen route");
 				}
 				else { //er zijn mogelijke routes
 					LOC[loc].fase = 5;
@@ -487,7 +463,7 @@ void LOC_exe() {
 					LOC[loc].reg &= ~(1 << 2);
 					break; //uit de function gaan
 				}
-				//nu een vrije route zoeken, wordt continue herhaald tot route is gevonden
+				//Vrije route zoeken, wordt continue herhaald tot route is gevonden
 				route = random(0, 12); //12 mogelijke routes
 				if (LOC[loc].reg & (1 << 1)) { //l>R
 					if (ROUTE[route].stationr == LOC[loc].station) goal = ROUTE[route].stationl;
@@ -495,15 +471,12 @@ void LOC_exe() {
 				else { //R>L
 					if (ROUTE[route].stationl == LOC[loc].station) goal = ROUTE[route].stationr;
 				}
-
 				if (goal == 0) break; //uitspringen, geen route gevonden
 				//Serial.println(goal);
-
 				tmp = 0;
 				//check doelstation, anders switch verlaten
 				if (res_station & (1 << goal - 1)) tmp = 1;
-				//check wissels
-
+				//check wissels, of vrij in de route
 				for (byte i = 0; i < 4; i++) {
 					if (~ROUTE[route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
 						//Serial.println("check wissels");
@@ -517,15 +490,12 @@ void LOC_exe() {
 						if (res_blok & (1 << i)) tmp = 1; //als blokkade is bezet, verlaat proces
 					}
 					if (~ROUTE[route].melders & (1 << i)) {
-						//check melders gebruik van changed is nu vrij (hoop ik)
-						//changed = MELDERS();
 						if (res_station & (1 << i))tmp = 1; //if false dan bezet
 					}
 				}
 				if (tmp == 1)break;
-				//doel station reserveren
+				//Route is vrij, doel station reserveren
 				res_station |= (1 << goal - 1); //goal 1 = bit 0
-				//route akkoord uitvoeren
 				LOC[loc].route = route;
 				LOC[loc].goal = goal;
 				LOC[loc].teller = 0;
@@ -535,16 +505,19 @@ void LOC_exe() {
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) res_blok |= (1 << i);
 					if (~ROUTE[route].melders & (1 << i)) res_station |= (1 << i);
+					if (i < 4) {
+						if (~ROUTE[LOC[loc].route].wissels & (1 << (7 - i))) {
+							res_wissels |= (1 << i); //reserveer wissel
+						}
+					}
 				}
 				break;
-			case 10: //set wissels
+			case 10: //set en reserveer wissels
 				if (~ROUTE[LOC[loc].route].wissels & (1 << (7 - LOC[loc].teller))) {  //bit 7~4 
 					//Serial.println("wissel");
-					res_wissels |= (1 << LOC[loc].teller); //reserveer wissel
-					tb = ROUTE[LOC[loc].route].wissels & (1 << (3 - LOC[loc].teller));
-
-					//DCC_acc(false, true, LOC[loc].teller, !tb); //set wissel +1?		
-					DCC_acc(false, true, LOC[loc].teller, tb); //set wissel +1?						
+					//res_wissels |= (1 << LOC[loc].teller); //reserveer wissel oude situ voor 30jun wissels direct reserveren niet 1 voor 1 
+					tb = ROUTE[LOC[loc].route].wissels & (1 << (3 - LOC[loc].teller)); //next wissel
+					DCC_acc(false, true, LOC[loc].teller, tb); //set wissel					
 				}
 				LOC[loc].teller++;
 				if (LOC[loc].teller > 3) {
@@ -553,7 +526,6 @@ void LOC_exe() {
 					LOC[loc].wait = 20;
 				}
 				break;
-
 			case 20: //drive init
 				LOC[loc].wait = 0;
 				LOC[loc].velo = LOC[loc].Vmin; LOC_calc(loc);
@@ -602,12 +574,10 @@ void LOC_exe() {
 						}
 					}
 				}
-
 				break;
 			case 30: //eerste test melders was positief
 				tmp = MELDERS(); //2e x melders testen om spikes uit te vangen
 				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt				
-
 				//Vloc aanpassen...
 					GPIOR1 &= ~(1 << 7); //use temp boolean
 					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
@@ -621,11 +591,11 @@ void LOC_exe() {
 						GPIOR1 |= (1 << 7);
 					}
 					if (GPIOR1 & (1 << 7)) {
-					//snelheidverschil groot, nieuwe routetijd opslaan in EEPROM
-					Serial.println("opslaan");
-					a = 200 + LOC[loc].route;
-					if (loc == 1)a = a + 12;
-					EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
+						//snelheidverschil groot, nieuwe routetijd opslaan in EEPROM
+						Serial.println("opslaan");
+						a = 200 + LOC[loc].route;
+						if (loc == 1)a = a + 12;
+						EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
 					}
 					GPIOR1 &= ~(1 << 7); //release temp boolean
 
@@ -647,12 +617,7 @@ void LOC_exe() {
 						LOC[loc].velo = 0; LOC_calc(loc);
 						break;
 					}
-
-					//aanpassen in EEPROM
-					//Serial.print("Vloc= "); Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
 					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven		
-
-					//Serial.println(res_station,BIN);
 					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
 						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
 					}
@@ -660,11 +625,9 @@ void LOC_exe() {
 						if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok &= ~(1 << i);
 						if (~ROUTE[LOC[loc].route].melders & (1 << i))res_station &= ~(1 << i);
 					}
-
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].fase = 35;
-
 				}
 				else {
 					LOC[loc].fase = 25; //opnieuw testen
@@ -675,25 +638,16 @@ void LOC_exe() {
 				//stop locomotief
 				LOC[loc].velo = 0; LOC_calc(loc);
 				LOC[loc].fase = 0;
-				LOC[loc].wait = 10; //station wachttijd
+				LOC[loc].wait = random(10, 100); //station wachttijd
 				break;
 
-			case 101: //begin find starting point (station)
-				//LOC[loc].wait = 5; //timing testen melders
-				//zorg dat de andere loc niet rijdt
-				//zet alle wissels in recht posities zodanig dat de locs niet naar  elkaar kunnen rijden
-				//Hier is een stukje handmatig en gezond verstand van de gebruiker nodig.
-
-				//leg huidige melders status vast
-				pos_melders[2] = MELDERS();
+			case 101: //begin find starting point (station)	
+				pos_melders[2] = MELDERS();//leg huidige melders status vast
 				pos_melders[3] = pos_melders[2];
-
 				LOC[loc].velo = 3; LOC_calc(loc);
 				LOC[loc].fase = 102;
 				break;
 			case 102:
-				//Serial.println(pos_melders[2], BIN);
-				//testen of er een verandering is in richting
 				pos_melders[3] = MELDERS();
 				changed = pos_melders[3] ^ pos_melders[2];
 				if (changed > 0) {
@@ -709,7 +663,6 @@ void LOC_exe() {
 								res_station |= (1 << i); //block station
 								LOC[loc].velo = 0; LOC_calc(loc); //stop
 								LOC[loc].fase = 0;
-
 							}
 						}
 					}
@@ -749,13 +702,7 @@ byte MELDERS() {
 	byte melder;
 	melder = pos_melders[1] << 4;
 	melder = melder + pos_melders[0];
-	//merk op 0=bezet
 	return melder;
-}
-void PRG_locadres(byte newadres, byte all) {
-	//sets adres of loc// all= true sets all 127 loc adresses to new adres, if adres is unknown
-	//and programs EEPROM 
-
 }
 void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 	//type loco= true, acc is false
@@ -773,8 +720,6 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		count_repeat = 4;
 	}
 	else { //accessoire
-		//Serial.println("CV sturen accessoire");
-
 		DCC_accAdres(adres); //fills byte 0 and byte 1
 		dcc_data[1] &= ~(15 << 0); //clear bits 0~3
 		dcc_data[2] = B11101100;
@@ -784,6 +729,7 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		dcc_aantalBytes = 5;
 		count_repeat = 4;
 
+		/*
 		Serial.print("bytes: ");
 		Serial.print(dcc_data[0], BIN);
 		Serial.print(" ");
@@ -796,12 +742,13 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		Serial.print(dcc_data[4], BIN);
 		Serial.print(" ");
 		Serial.println(dcc_data[5], BIN);
+*/
+
 	}
 }
 void PRG_dec() {
-	//Serial.println(PRG_level);
 	switch (PRG_fase) {
-	case 0: //INstellen DCC adres
+	case 0: //Instellen DCC adres
 		switch (PRG_level) {
 		case 2:  //dec voor welk loc, wissels of seinen
 			PRG_typeDCC--;
@@ -854,13 +801,10 @@ void PRG_dec() {
 			}
 			break;
 		}
-		//break;
-	//}
 	case 2: //write DCC
 		prg_typecv--;
 		if (prg_typecv > 1) prg_typecv = 1; //loco 1 of loco 2
 		break;
-
 	case 3: //write CV
 		switch (PRG_level) {
 		case 2: //parameter
@@ -888,10 +832,8 @@ void PRG_dec() {
 			if (prg_wissels > 3)prg_wissels = 0;
 			break;
 		}
-
 		break;
 	}
-	//DSP_prg();
 }
 void PRG_inc() {
 	switch (PRG_fase) {
@@ -1013,7 +955,6 @@ void DCC_command() {
 	}
 	//Serial.print("Send: "); Serial.print(dcc_data[0], BIN); Serial.print("- "); Serial.println(dcc_data[1], BIN);
 	//Serial.println(dcc_data[0],BIN);
-//}//tempcount
 }
 void SW_exe() {
 	byte poort; byte changed; byte temp;
@@ -1021,9 +962,7 @@ void SW_exe() {
 	if (GPIOR0 & (1 << 4)) {
 		//DCC enabled switch lezen
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
-
 			if (~PINB & (1 << 1)) PINB |= (1 << 0); //toggle DCC enabled
-
 			if (PINB & (1 << 1)) {
 				GPIOR1 |= (1 << 3);
 			}
@@ -1037,7 +976,6 @@ void SW_exe() {
 		poort = PIND;
 		poort = poort >> 4; //isolate 1 nibble
 		changed = poort ^ pos_melders[bitRead(PIND, 3)];
-		//[PIND & (1 << 3)]; kan niet array vraagt een cyfer niet een true or false
 		if (changed > 0) {
 			if (PIND & (1 << 3)) {
 				pos_melders[1] = poort;
@@ -1045,23 +983,8 @@ void SW_exe() {
 			else {
 				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
 			}
-			/*
-			for (byte i = 0; i < 4; i++) {
-			switched, beter md_exe niet gebruiken
-			if (changed & (1 << i)) {
-			if (PIND & (1 << 3)) {
-			MD_exe(i, poort & (1 << i));
-			}
-			else {
-			MD_exe(i + 4, poort & (1 << i));
-			}
-			}
-			}
-			*/
 			if (PRG_fase == 1 & PRG_level == 3)DSP_prg();
 		}
-
-
 	}
 	else { //switches on poort C lezen
 		poort = PINC;
@@ -1073,22 +996,6 @@ void SW_exe() {
 		}
 		sw_statusC = poort;
 	}
-	//}//counter
-}
-void MD_exe(byte md, boolean onoff) { ////NIET IN GEBRUIK!!!! 
-	/*
-	waarschijnlijk geen goed idee om het bezet zetten van een melder te gebruiken als actie,
-	melders hebben de neiging ernstig te denderen.
-	Waarschijnlijk beter om de pos_melder nibbles te testen bij bv.het zoeken van een vrij station,
-	en wanneer een loc rijd dus telkens even testen of het doelstation, blok bezet is.
-	Dender zal dan veel minder invloed hebben
-
-	Serial.print("POsmelder0: "); Serial.print(pos_melders[0], BIN);
-	Serial.print(" "); Serial.print("Posmelder1: "); Serial.println(pos_melders[1], BIN);
-
-	Serial.print("Melder: "); Serial.print(md); Serial.print(" "); Serial.println(onoff);
-	if (PRG_fase == 1) DSP_prg();
-*/
 }
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
@@ -1104,7 +1011,6 @@ void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	else { //leave program mode 
 		GPIOR0 &= ~(1 << 5); //pendel mode
 		PRG_level = 0;
-		//DSP_start();
 		PDL_fase = 0;
 		DSP_pendel();
 	}
@@ -1343,9 +1249,6 @@ void SW_PRG(byte sw) {
 		break;
 	}
 	if (~GPIOR1 & (1 << 1)) DSP_prg();
-	//DSP_prg();
-	//dit bit zorgt dat pas na de bewerking, bv. adres schrijven
-//het display vernieuwd ibv. progressbar bv.
 }
 void SW_pendel(byte sw) {
 	byte loc = 0;
@@ -1358,7 +1261,6 @@ void SW_pendel(byte sw) {
 			break;
 		case 1:
 			LOC[loc].reg ^= (1 << 0); //toggle start/stop
-
 			if (LOC[loc].reg & (1 << 0)) {  //start rijden process
 				LOC[loc].fase = 0;
 				LOC[loc].wait = 0;
@@ -1382,10 +1284,12 @@ void SW_pendel(byte sw) {
 				LOC[loc].station++;
 				if (res_station & (1 << LOC[loc].station - 1)) LOC[loc].station++; //gereserveerde stations overslaan
 				if (LOC[loc].station > 8) {
-					LOC[loc].station = 1;
-					if (res_station & (1 << 0))LOC[loc].station = 2;
+					LOC[loc].station = 0;
+					//if (res_station & (1 << 0))LOC[loc].station = 2;
 				}
-				res_station |= (1 << LOC[loc].station - 1); //reserveer station
+				else {
+					res_station |= (1 << LOC[loc].station - 1); //reserveer station
+				}
 			}
 			break;
 		case 3:
@@ -1417,11 +1321,11 @@ void SW_pendel(byte sw) {
 			break;
 		case 1:
 			LOC[loc].Vmin++;
-			if (LOC[loc].Vmin > 10)LOC[loc].Vmin = 1;
+			if (LOC[loc].Vmin > 5)LOC[loc].Vmin = 1;
 			break;
 		case 2:
 			LOC[loc].Vmax--;
-			if (LOC[loc].Vmax < 10)LOC[loc].Vmax = 28;
+			if (LOC[loc].Vmax < 5)LOC[loc].Vmax = 28;
 			//merk op als eeprom fout wordt gelezen komt er 255 in het vmax
 			break;
 		case 3:
@@ -1462,11 +1366,6 @@ void DSP_pendel() {
 		}
 		display.print(LOC[loc].velo);
 		regel2; display.print(LOC[loc].station); TXT(32); display.print(LOC[loc].goal);
-
-		//display.fillRect(5, 22, 23, 23, WHITE);
-		//display.setTextColor(BLACK);
-		//display.setCursor(10, 27); display.print(LOC[loc].station);
-
 		if (LOC[loc].reg & (1 << 0)) {
 			button = 4;
 		}
@@ -1536,7 +1435,6 @@ void DSP_prg() {
 			TXT(7); TXT(0); regel2; TXT(16);
 			break;
 		}
-
 		buttons = 10;
 		break;
 		//**********************************level 2
@@ -1585,11 +1483,8 @@ void DSP_prg() {
 				TXT(3);
 				break;
 			}
-			//buttons = 10;
 			break;
-
 		case 2: //Write adres in loc and accessoires gebleven
-			//regel1s; 
 			TXT(10); TXT(1); regel2; TXT(2);
 			switch (prg_typecv) {
 			case 0:
@@ -1599,7 +1494,6 @@ void DSP_prg() {
 				TXT(102);
 				break;
 			}
-			//buttons = 10;
 			break;
 		case 3: //CV programming gebleven
 			//regel1s; 
@@ -1615,7 +1509,6 @@ void DSP_prg() {
 				TXT(6);
 				break;
 			}
-			//buttons = 10;
 			break;
 		case 4:
 			TXT(16); regel2;
@@ -1659,7 +1552,6 @@ void DSP_prg() {
 			}
 			buttons = 10;
 			break;
-
 		case 1: //Testen
 			cd; regel1s; TXT(11);
 			switch (PRG_typeTest) {
@@ -1691,7 +1583,6 @@ void DSP_prg() {
 			case 2: //Test wissels
 				TXT(8);
 				display.drawRect(1 + (32 * (prg_wissels)), 18, 30, 23, WHITE); //x,y, width, height
-
 				for (byte i = 0; i < 4; i++) {
 					if (pos_wissels & (1 << i)) {
 						display.drawLine(position, 35, position + 21, 25, WHITE);
@@ -1740,7 +1631,6 @@ void DSP_prg() {
 			break;
 		case 3: //CV programming level 3 CV keuze
 			TXT_cv3();
-			//display.print(PRG_cvs[0]);
 			buttons = 10;
 			break;
 		case 4: //routes wissels vastleggen
@@ -1759,12 +1649,10 @@ void DSP_prg() {
 
 				display.drawLine(70, 32, 90, 32, WHITE);
 			}
-
 			buttons = 15;
 			break;
 		}
 		break;
-
 		//**********************LEVEL 4
 	case 4: //level 4
 			//Serial.print("PRG_level:");
@@ -1825,8 +1713,6 @@ void TXT_cv3() {
 	regel2; TXT(5); display.print(PRG_cvs[0]);
 }
 void DSP_buttons(byte mode) {
-	//Serial.println("buttons");
-	//sets mode in display
 	display.fillRect(0, 50, 128, 64, BLACK); //schoont het onderste stukje display, 
 //seinen veroorzaakt een storing daar, misschien nog eens naar kijken waar het vandaan komt.
 	//waarschijnlijk de conversie van nummer naar txt
@@ -1881,7 +1767,6 @@ void DSP_buttons(byte mode) {
 	default:
 		break;
 	}
-
 	display.display();
 }
 void DSP_settxt(byte X, byte Y, byte size) {
@@ -2019,17 +1904,10 @@ void TXT(byte t) {
 }
 void loop() {	//slow events timer
 	count_slow++;
-	if (count_slow > 12000) {
-
+	if (count_slow > 12000) { //1200 goede waarde voor deze timer
 		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
-
-
-		//12000 is hoe snel de commandoos elkaar opvolgen vooral lange commandoos als CV accessoires
-		//bij 10000 werk dit niet misschien nog wat fine tunen...
 		count_slow = 0;
-		//slow events
 		SW_exe(); //switches
-		//start DCC command transmit
 		count_locexe++;
 		if (count_locexe > 10) {
 			if (GPIOR1 & (1 << 4)) {
