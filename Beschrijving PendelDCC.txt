@@ -51,6 +51,8 @@ dcc_commandreg
 bit710 command valid true, zenden, bij false idle byte sturen
 bit6 true lok command, blijven herhalen
 
+MEM_reg
+bit0 seinen decoders dual (1 decoderkanaal voor 1 led, 1 poort gebruiken) true; mono (1 decoderkanaal voor 2 leds, beide poorten gebruiken) false
 
 Com reg GPIOR0
 bit0	Flag bit half in ISR
@@ -81,7 +83,10 @@ EEPROM adressen
 105 Vmin Loc2
 106 Vmax loc1
 107 Vmax loc2
-108~163 data routes
-180 loc1 functions
-181 loc2 functions
+108~168 data routes
+168~176 routes seinen[0]
+180~192 routes seinen[1]
+195 loc1 functions
+196 loc2 functions
 200~223 Vloc, snelheid per route/loc
+250 MEM_reg

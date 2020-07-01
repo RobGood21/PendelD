@@ -60,6 +60,7 @@ struct route {
 	byte stationl;
 	byte stationr;
 	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
+	byte seinen[2]; //0=0-7 1=8-15
 	byte blokkades;
 	byte melders; //melders die niet bezet mogen zijn in een route (stations die worden overgeslagen, kan een loc op staan)
 	byte Vloc[2];
@@ -92,6 +93,7 @@ byte pos_melders[4]; //stand van de melders
 //0=melders 1-4; 1=melders 5-8; 2 is samengevoegd laatst bepaald; 3=samengevoegd huidig
 
 //program mode
+byte MEM_reg; //8 op te slaan booleans
 byte PRG_fase;
 byte PRG_level; //hoe diep in het programmeer proces
 byte PRG_typeDCC; //actieve adres
@@ -100,6 +102,7 @@ byte prg_wissels; //actieve wissel
 byte prg_sein; //actief sein 16x
 byte prg_blokkade;  //active blokkade, weke wordt er aangepast
 byte prg_typecv; //ingestelde waarde op PRG_level 2
+byte prg_diverse;
 byte PRG_cvs[2]; //0=CV 1=waarde
 //Pendel mode
 //pendel mode
@@ -204,7 +207,7 @@ void MEM_read() {
 			LOC[i].adres = 0x03 + i;
 		}
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
-		LOC[i].function = EEPROM.read(180 + i);
+		LOC[i].function = EEPROM.read(195 + i);
 		if (LOC[i].function == 0xFF)LOC[i].function = B10010000;
 		LOC[i].Vmin = EEPROM.read(104 + i);
 		if (LOC[i].Vmin > 10)LOC[i].Vmin = 1;
@@ -224,9 +227,10 @@ void MEM_read() {
 	}
 	dcc_seinen = EEPROM.read(103); //heeft 16 dcc kanalen)
 	if (dcc_seinen == 0xFF) {
-		dcc_seinen = 252;
+		dcc_seinen = 248;
 		//EEPROM.update(103, dcc_seinen);
 	}
+	MEM_reg = EEPROM.read(250);
 	MEM_readroute();
 }
 void MEM_readroute() { //zie beschrijving
@@ -235,7 +239,15 @@ void MEM_readroute() { //zie beschrijving
 		ROUTE[i].stationr = EEPROM.read(120 + i); //132
 		ROUTE[i].wissels = EEPROM.read(132 + i); // 144 let op default is 0xFF, dus false is bezet.....
 		ROUTE[i].blokkades = EEPROM.read(144 + i); //156 blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
-		ROUTE[i].melders = EEPROM.read(156 + i);
+		ROUTE[i].melders = EEPROM.read(156 + i); //hoogste nu 156+12=168
+		for (byte b = 0; b < 2; b++) {
+			if (b == 0) {
+				ROUTE[i].seinen[0] = EEPROM.read(168 + i);
+			}
+			else {
+				ROUTE[i].seinen[1] = EEPROM.read(180+i);
+			}
+		}
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
 	}
@@ -247,7 +259,7 @@ void MEM_loc_update(byte loc) {
 	EEPROM.update(number, LOC[loc].Vmin);
 	number = 106 + loc;
 	EEPROM.update(number, LOC[loc].Vmax);
-	number = 180;
+	number = 195;
 	EEPROM.update(number, LOC[loc].function);
 }
 void MEM_update() { //sets new values/ sends CV 
@@ -309,6 +321,8 @@ void MEM_update() { //sets new values/ sends CV
 			EEPROM.update(132 + i, ROUTE[i].wissels); //144
 			EEPROM.update(144 + i, ROUTE[i].blokkades); //156
 			EEPROM.update(156 + i, ROUTE[i].melders);//168
+			EEPROM.update(168 + i, ROUTE[i].seinen[0]);
+			EEPROM.update(180 + i, ROUTE[i].seinen[1]);
 		}
 		break;
 	}
@@ -500,7 +514,7 @@ void LOC_exe() {
 				LOC[loc].goal = goal;
 				LOC[loc].teller = 0;
 				LOC[loc].fase = 10;
-				LOC[loc].wait = 0;
+				LOC[loc].wait =2; // wachten tussen wissels en sein bediening
 				//reserveer blokkades en melders(stations)
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) res_blok |= (1 << i);
@@ -512,7 +526,7 @@ void LOC_exe() {
 					}
 				}
 				break;
-			case 10: //set en reserveer wissels
+			case 10: //set en reserveer wissels 
 				if (~ROUTE[LOC[loc].route].wissels & (1 << (7 - LOC[loc].teller))) {  //bit 7~4 
 					//Serial.println("wissel");
 					//res_wissels |= (1 << LOC[loc].teller); //reserveer wissel oude situ voor 30jun wissels direct reserveren niet 1 voor 1 
@@ -525,6 +539,9 @@ void LOC_exe() {
 					LOC[loc].fase = 20;
 					LOC[loc].wait = 20;
 				}
+				break;
+			case 15: //set seinen
+
 				break;
 			case 20: //drive init
 				LOC[loc].wait = 0;
@@ -770,7 +787,7 @@ void PRG_dec() {
 				break;
 			case 3:
 				dcc_seinen--;
-				if (dcc_seinen == 0)dcc_seinen = 252;
+				if (dcc_seinen == 0)dcc_seinen = 248;
 				break;
 			}
 			break;
@@ -833,6 +850,10 @@ void PRG_dec() {
 			break;
 		}
 		break;
+	case 5: //diverse instellingen tbv MEM_reg
+		prg_diverse++;
+		if (prg_diverse > 1)prg_diverse = 0;
+		break;
 	}
 }
 void PRG_inc() {
@@ -859,7 +880,7 @@ void PRG_inc() {
 				break;
 			case 3:
 				dcc_seinen++;
-				if (dcc_seinen > 252)dcc_seinen = 1;
+				if (dcc_seinen > 248)dcc_seinen = 1;
 				break;
 			}
 			break;
@@ -920,6 +941,9 @@ void PRG_inc() {
 			ROUTE[rt_sel].wissels ^= (1 << (7 - prg_wissels)); //toggle bit 7~4 
 			break;
 		}
+		break;
+	case 5: //diverse booleans aanpassen in MEM_reg
+		MEM_reg ^= (1 << prg_diverse);
 		break;
 	}
 }
@@ -1045,11 +1069,11 @@ void SW_PRG(byte sw) {
 		switch (sw) {
 		case 0:
 			PRG_fase--;
-			if (PRG_fase > 4)PRG_fase = 4;
+			if (PRG_fase > 5)PRG_fase = 5;
 			break;
 		case 1:
 			PRG_fase++;
-			if (PRG_fase > 4)PRG_fase = 0;
+			if (PRG_fase > 5)PRG_fase = 0;
 			break;
 		case 2:
 			PRG_level++;
@@ -1091,16 +1115,17 @@ void SW_PRG(byte sw) {
 				ROUTE[rt_sel].stationr++;
 				if (ROUTE[rt_sel].stationr > 8)ROUTE[rt_sel].stationr = 0;
 				break;
+			case 5: //Diverse
+				EEPROM.update(250, MEM_reg);
+				PRG_level--;
+				break;
 			}
 			break;
 		case 3:
 			switch (PRG_fase) {
 			case 4:
-				//MEM_update();
 				PRG_level++;
-				//Serial.println(PRG_level);
 				break;
-
 			default:
 				PRG_level--;
 				MEM_cancel();
@@ -1210,8 +1235,17 @@ void SW_PRG(byte sw) {
 		case 4: //route instellen, seinen instellen
 			switch (sw) {
 			case 0:
+				prg_sein++;
+				if (prg_sein > 15)prg_sein = 0;
 				break;
 			case 1:
+				if (prg_sein < 8) {
+					ROUTE[rt_sel].seinen[0] ^=(1 << prg_sein);
+				}
+				else {
+					ROUTE[rt_sel].seinen[1] ^=(1 << prg_sein - 8);
+				}
+				Serial.println(ROUTE[rt_sel].seinen[0]);
 				break;
 			case 2:
 				break;
@@ -1410,6 +1444,7 @@ void DSP_prg() {
 	byte buttons;
 	byte position = 5;
 	byte temp;
+	byte b; byte s;
 	switch (PRG_level) {
 		//**********************
 	case 1: //soort instelling
@@ -1433,6 +1468,9 @@ void DSP_prg() {
 			break;
 		case 4: //instellen routes
 			TXT(7); TXT(0); regel2; TXT(16);
+			break;
+		case 5: //Diverse algemene instellingen
+			TXT(7); TXT(0); regel2; TXT(33);
 			break;
 		}
 		buttons = 10;
@@ -1460,11 +1498,8 @@ void DSP_prg() {
 				TXT(9);
 				break;
 			}
-			//buttons = 10;
 			break;
-
 		case 1: //Testen
-			//regel1s; 
 			TXT(11); regel2;
 			switch (PRG_typeTest) {
 			case 0:
@@ -1510,12 +1545,26 @@ void DSP_prg() {
 				break;
 			}
 			break;
-		case 4:
+		case 4://routes
 			TXT(16); regel2;
 			//rt_sel =0~7  toont 1~8
 			display.print(rt_sel + 1); TXT(200); TXT(30); display.print(ROUTE[rt_sel].stationl);
 			TXT(32); display.print(ROUTE[rt_sel].stationr); TXT(31);
 			buttons = 14;
+			break;
+		case 5: //Instelling diverse
+			switch (prg_diverse) {
+			case 0:
+				TXT(33); TXT(9); regel2;
+				if (MEM_reg & (1 << 0)) {
+					TXT(35);
+				}
+				else {
+					TXT(34);
+				}
+				break;
+			}
+			buttons = 6;
 			break;
 		}
 		break;
@@ -1665,6 +1714,23 @@ void DSP_prg() {
 			break;
 		case 4: //Route program, seinen instellen
 			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(9);
+			regel2; display.print(prg_sein+1);
+
+			if (prg_sein  < 8) {
+				b = 0;
+				s = prg_sein;
+			}
+			else {
+				b = 1;
+				s = prg_sein - 8;
+			}
+
+			if (~ROUTE[rt_sel].seinen[b] & (1 << s)) { //if false bezet
+				display.fillRect(33, 25, 12, 12, WHITE);
+			}
+			else {
+				display.drawRect(33, 25, 12, 12, WHITE);
+			}
 			buttons = 16;
 			break;
 		}
@@ -1737,7 +1803,11 @@ void DSP_buttons(byte mode) {
 	case 4:
 		TXT(20); //pendel in stop
 		break;
-	case 5: //routes, instellen wissels
+		//case 5: //routes, instellen wissels
+			//???????
+		//	break;
+	case 6: //diverse instellingen van MEM_reg
+		TXT(36);
 		break;
 
 	case 10: //standaard programmeer balk
@@ -1836,7 +1906,7 @@ void TXT(byte t) {
 		break;
 
 	case 19:
-		display.print(F("<>    S     *    B/M"));  //keuze routes, seinen
+		display.print(F("S     *     -    B/M"));  //keuze routes, seinen
 		break;
 	case 20:
 		display.print(F("loc   stop    ?    F"));
@@ -1879,9 +1949,19 @@ void TXT(byte t) {
 	case 32:
 		display.print(F("-"));
 		break;
-		//case 33:
-		//	display.print(F(" "));
-		//	break;
+	case 33:
+		display.print(F("Diverse "));
+		break;
+	case 34:
+		display.print(F("Mono "));
+		break;
+	case 35:
+		display.print(F("Dual "));
+		break;
+	case 36:
+		display.print(F(">     *     V      X"));  //keuze routes, seinen
+		break;
+
 	case 100:
 		display.print(F("0 "));
 		break;
