@@ -70,7 +70,7 @@ bit1 blocks DSP updates
 bit2 Active loc (in action) om de beurt worden locs gechecked in void LOC_exe
 bit3 switch status pin 9 (portB bit1)
 bit4 Wissels init
-bit5
+bit5 Seinen, controle mono/duo beide decoders omzetten
 bit6 algemeen boolean binnen een void		
 bit7 algemeen boolean binnen een void, te gebruiken
 

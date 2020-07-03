@@ -91,6 +91,8 @@ byte pos_wissels; //stand positie van de vier wissels
 byte pos_seinen[2]; //stand positie van de seinen
 byte pos_melders[4]; //stand van de melders
 //0=melders 1-4; 1=melders 5-8; 2 is samengevoegd laatst bepaald; 3=samengevoegd huidig
+byte sein2;
+byte possein2;
 
 //program mode
 byte MEM_reg; //8 op te slaan booleans
@@ -245,7 +247,7 @@ void MEM_readroute() { //zie beschrijving
 				ROUTE[i].seinen[0] = EEPROM.read(168 + i);
 			}
 			else {
-				ROUTE[i].seinen[1] = EEPROM.read(180+i);
+				ROUTE[i].seinen[1] = EEPROM.read(180 + i);
 			}
 		}
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
@@ -364,9 +366,6 @@ void DCC_endwrite() {
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	byte da;	//ws=wissel of sein
-	//num is welk volgnummer
-	//maakt commandoos voor accessoires, wissels, seinen
-	//poort true is afbuigend
 	if (ws) { //true seinen
 		da = dcc_seinen;
 		//Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
@@ -514,7 +513,7 @@ void LOC_exe() {
 				LOC[loc].goal = goal;
 				LOC[loc].teller = 0;
 				LOC[loc].fase = 10;
-				LOC[loc].wait =2; // wachten tussen wissels en sein bediening
+				LOC[loc].wait = 2; // wachten tussen wissels en sein bediening
 				//reserveer blokkades en melders(stations)
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) res_blok |= (1 << i);
@@ -536,12 +535,33 @@ void LOC_exe() {
 				LOC[loc].teller++;
 				if (LOC[loc].teller > 3) {
 					LOC[loc].teller = 0;
-					LOC[loc].fase = 20;
-					LOC[loc].wait = 20;
+					LOC[loc].fase = 12;
+					LOC[loc].wait = 1; //20?
+					GPIOR1 &= ~(1 << 7); //let op dit kan een probleem geven als deze algemene boolean ergens anders wordt gebruikt
 				}
 				break;
-			case 15: //set seinen
-
+			case 12: //set seinen
+				if (~ROUTE[LOC[loc].route].seinen[a] & (1 << LOC[loc].teller)) {
+					if (GPIOR1 & (1 << 7)) { //false byte 0, true byte 1
+						tmp = LOC[loc].teller + 8;
+					}
+					else {
+						tmp = LOC[loc].teller;
+					}
+					SET_sein(tmp, false);
+				}
+				if (GPIOR1 & (1 << 7)) {
+					GPIOR1 |= (1 << 7);
+				}
+				else {
+					LOC[loc].teller++;
+					GPIOR1 &= ~(1 << 7);
+					if (LOC[loc].teller > 7) { //alle 16 seinen bekeken voor deze route
+						LOC[loc].teller = 0;
+						LOC[loc].fase = 20;
+						LOC[loc].wait = 5;
+					}
+				}
 				break;
 			case 20: //drive init
 				LOC[loc].wait = 0;
@@ -556,7 +576,6 @@ void LOC_exe() {
 			case 25:
 				//test of doelstation is bereikt,  is weer vrij
 				tmp = MELDERS();
-				//Serial.println(tmp, BIN);
 				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt
 					LOC[loc].fase = 30;
 				}
@@ -642,6 +661,16 @@ void LOC_exe() {
 						if (~ROUTE[LOC[loc].route].blokkades & (1 << i)) res_blok &= ~(1 << i);
 						if (~ROUTE[LOC[loc].route].melders & (1 << i))res_station &= ~(1 << i);
 					}
+					//seinen vrijgeven, rood maken
+					for (byte b = 0; b < 2; b++) {
+						for (byte s = 0; s < 8; s++) {
+							if (~ROUTE[LOC[loc].route].seinen[b] & (1 << s)) {
+								//opgenomen sein gevonden
+								//Serial.print("Sein: "); Serial.println(b * 8 + s);
+								SET_sein(b * 8 + s, true);
+							}
+						}
+					}
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].fase = 35;
@@ -701,17 +730,46 @@ void LOC_exe() {
 	//if (temp_blok != res_blok) { Serial.print("res_blokkade: "); Serial.println(res_blok, BIN); }
 	//temp_blok = res_blok;
 }
+void SET_sein(byte sein, boolean stand) {
+	if (MEM_reg & (1 << 0)) { //dual stand
+		sein2 = (sein * 2) + 1;
+		possein2 = !stand;
+		Serial.println("dec1");
+		DCC_acc(true, true, sein * 2, stand);
+		GPIOR1 |= (1 << 5);
+	}
+	else { //mono stand
+		DCC_acc(true, true, sein, stand);
+	}
+}
+void SET_sein2() { //sets 2e sein in dual mode
+	Serial.println("dec2");
+	DCC_acc(true, true, sein2, possein2);
+	GPIOR1 &= ~(1 << 5);
+}
 void INIT_wissels() {
 	//initialiseert de aangesloten wissels en seinen, false is wissels
-	//wissels, gebruiken PRG_wissels ... kan problemen geven door dubbel gebruik
-	if (~GPIOR0 & (1 << 2)) { //als verwerken vorige DCC commando klaar is
-		//Serial.println(prg_wissels);
+	if (GPIOR0 & (1 << 2)) return;//als verwerken vorige DCC commando klaar is
+
+	if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
+		//seinen
+		SET_sein(prg_sein, true);
+		prg_sein++;
+		if (prg_sein > 15) {
+			prg_sein = 0;
+			GPIOR1 |= (1 << 4); //exit init_wissels
+			GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
+		}
+	}
+	else {
+		//wissels
+	//Serial.println(prg_wissels);
 		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
 		GPIOR1 ^= (1 << 6);
 		if (~GPIOR1 & (1 << 6))prg_wissels++;
 		if (prg_wissels > 4) {
 			prg_wissels = 0;
-			GPIOR1 |= (1 << 4); //exit wissel init
+			GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
 		}
 	}
 }
@@ -736,7 +794,7 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		dcc_aantalBytes = 4;
 		count_repeat = 4;
 	}
-	else { //accessoire
+	else { //accessoire, wissels of seinen
 		DCC_accAdres(adres); //fills byte 0 and byte 1
 		dcc_data[1] &= ~(15 << 0); //clear bits 0~3
 		dcc_data[2] = B11101100;
@@ -1167,7 +1225,6 @@ void SW_PRG(byte sw) {
 					break;
 				case 3: //seinen lvl3, omzetten sein decoders 	
 					GPIOR1 &= ~(1 << 6);
-
 					if (prg_sein < 8) {
 						pos_seinen[0] ^= (1 << prg_sein);
 						if (pos_seinen[0] & (1 << prg_sein))GPIOR1 |= (1 << 6);
@@ -1176,11 +1233,7 @@ void SW_PRG(byte sw) {
 						pos_seinen[1] ^= (1 << (prg_sein - 8));
 						if (pos_seinen[1] & (1 << prg_sein - 8))GPIOR1 |= (1 << 6);
 					}
-					//Serial.print(pos_seinen[0], BIN); Serial.print("  ");
-					//Serial.println(pos_seinen[1], BIN);
-					//Serial.print("poort: "); Serial.println(bitRead(GPIOR1,6));
-
-					DCC_acc(true, true, prg_sein, GPIOR1 & (1 << 6));
+					SET_sein(prg_sein, GPIOR1 & (1 << 6));
 					break;
 				case 4://melders
 					break;
@@ -1240,10 +1293,10 @@ void SW_PRG(byte sw) {
 				break;
 			case 1:
 				if (prg_sein < 8) {
-					ROUTE[rt_sel].seinen[0] ^=(1 << prg_sein);
+					ROUTE[rt_sel].seinen[0] ^= (1 << prg_sein);
 				}
 				else {
-					ROUTE[rt_sel].seinen[1] ^=(1 << prg_sein - 8);
+					ROUTE[rt_sel].seinen[1] ^= (1 << prg_sein - 8);
 				}
 				Serial.println(ROUTE[rt_sel].seinen[0]);
 				break;
@@ -1714,9 +1767,9 @@ void DSP_prg() {
 			break;
 		case 4: //Route program, seinen instellen
 			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(9);
-			regel2; display.print(prg_sein+1);
+			regel2; display.print(prg_sein + 1);
 
-			if (prg_sein  < 8) {
+			if (prg_sein < 8) {
 				b = 0;
 				s = prg_sein;
 			}
@@ -1990,11 +2043,19 @@ void loop() {	//slow events timer
 		SW_exe(); //switches
 		count_locexe++;
 		if (count_locexe > 10) {
-			if (GPIOR1 & (1 << 4)) {
-				LOC_exe();
+			if (GPIOR1 & (1 << 5)) { //2e sein decoder to be set
+				//wait for accessoire sending is ready
+				if (~GPIOR0 & (1 << 2)) {
+					SET_sein2();
+				}
 			}
 			else {
-				INIT_wissels();
+				if (GPIOR1 & (1 << 4)) {
+					LOC_exe();
+				}
+				else {
+					INIT_wissels();
+				}
 			}
 			count_locexe = 0;
 		}
