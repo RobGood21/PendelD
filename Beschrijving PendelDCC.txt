@@ -74,6 +74,14 @@ bit5 Seinen, controle mono/duo beide decoders omzetten
 bit6 algemeen boolean binnen een void		
 bit7 algemeen boolean binnen een void, te gebruiken
 
+COM_reg 3 GPIOR2
+bit0 seinrichting in route 
+bit1 alle seinen in een route weer op stoppen zetten voor loc 0
+bit2 alle seinen in een route weer op stop loc 1
+bit3 SET_sein in process wachten tot sein is verwerkt voordat volgend sein kan worden gestart.
+bit4 Algemeen boolean
+bit7 Sein enabled, dcc command in progress
+
 EEPROM adressen
 100 adres loc1
 101 adres loc2
@@ -84,9 +92,12 @@ EEPROM adressen
 106 Vmax loc1
 107 Vmax loc2
 108~168 data routes
-168~176 routes seinen[0]
-180~192 routes seinen[1]
+
 195 loc1 functions
 196 loc2 functions
 200~223 Vloc, snelheid per route/loc
 250 MEM_reg
+300~311 routes seinen[0]
+312~323 routes seinen[1]
+324~335 routes seinen[2]
+336~347 routes seinen[3]

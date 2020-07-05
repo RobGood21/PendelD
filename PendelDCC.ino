@@ -34,6 +34,7 @@ struct LOC {
 	bit1 relatieve richting rijdend naar rechts of rijdend naar links
 	bit2 tijdelijk bit geeft aan of er een route in de richting kan worden gekozen
 	bit3 Versnellen false, vertragen true
+	bit7 richting bij start, default = true
 	*/
 	byte Vmax;
 	byte Vmin;
@@ -60,7 +61,7 @@ struct route {
 	byte stationl;
 	byte stationr;
 	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
-	byte seinen[2]; //0=0-7 1=8-15
+	byte seinen[4]; //b0=>0-7 b1=>8-15 b2=<0-7 b3=<8-15
 	byte blokkades;
 	byte melders; //melders die niet bezet mogen zijn in een route (stations die worden overgeslagen, kan een loc op staan)
 	byte Vloc[2];
@@ -93,6 +94,9 @@ byte pos_melders[4]; //stand van de melders
 //0=melders 1-4; 1=melders 5-8; 2 is samengevoegd laatst bepaald; 3=samengevoegd huidig
 byte sein2;
 byte possein2;
+byte seinoff_route[2];
+byte seinoff_dir[2];
+byte seinoff_count[2];
 
 //program mode
 byte MEM_reg; //8 op te slaan booleans
@@ -141,8 +145,7 @@ void setup() {
 	GPIOR1 &= ~(1 << 4);
 	MEM_read();
 	//init
-	LOC[0].speed = B01100000; //set start direction forward of locomotive
-	LOC[1].speed = B01100000;
+	
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	DSP_pendel();
 }
@@ -202,6 +205,8 @@ ISR(TIMER2_COMPA_vect) {
 	sei();
 }
 void MEM_read() {
+	LOC[0].speed = B01100000; //set start direction forward of locomotive
+	LOC[1].speed = B01100000;
 	byte a;
 	for (byte i = 0; i < 2; i++) {
 		LOC[i].adres = EEPROM.read(100 + i);
@@ -233,6 +238,23 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_reg = EEPROM.read(250);
+	//set start direction forward of locomotive
+	//251 reg loc0 252 reg loc1 
+	//overige bits in reg niet lezen dan gaat het mis
+	LOC[0].speed = B01100000; 
+	LOC[1].speed = B01100000;
+	LOC[0].reg |= (1 << 7);
+	LOC[1].reg |= (1 << 7);
+
+	//Serial.println(EEPROM.read(251),BIN);
+	if (~EEPROM.read(251) & (1 << 7)) {
+		LOC[0].speed &= ~(1 << 5);
+		LOC[0].reg &=~(1 << 7);
+	}
+	if (~EEPROM.read(252) & (1 << 7)) {
+		LOC[1].speed &= ~(1 << 5);
+		LOC[1].reg &=~(1 << 7);
+	}
 	MEM_readroute();
 }
 void MEM_readroute() { //zie beschrijving
@@ -242,13 +264,9 @@ void MEM_readroute() { //zie beschrijving
 		ROUTE[i].wissels = EEPROM.read(132 + i); // 144 let op default is 0xFF, dus false is bezet.....
 		ROUTE[i].blokkades = EEPROM.read(144 + i); //156 blokkade instelling terugladen hoogste nu 140 (132+i(max 7)
 		ROUTE[i].melders = EEPROM.read(156 + i); //hoogste nu 156+12=168
-		for (byte b = 0; b < 2; b++) {
-			if (b == 0) {
-				ROUTE[i].seinen[0] = EEPROM.read(168 + i);
-			}
-			else {
-				ROUTE[i].seinen[1] = EEPROM.read(180 + i);
-			}
+
+		for (byte b = 0; b < 4; b++) {
+			ROUTE[i].seinen[b] = EEPROM.read(300 + i + (b * 12));
 		}
 		if (ROUTE[i].stationl > 8)ROUTE[i].stationl = 0;
 		if (ROUTE[i].stationr > 8)ROUTE[i].stationr = 0;
@@ -263,6 +281,9 @@ void MEM_loc_update(byte loc) {
 	EEPROM.update(number, LOC[loc].Vmax);
 	number = 195;
 	EEPROM.update(number, LOC[loc].function);
+
+	//Serial.print("Update: "); Serial.println(LOC[loc].reg, BIN);
+	EEPROM.update(251 + loc, LOC[loc].reg);
 }
 void MEM_update() { //sets new values/ sends CV 
 	//	Serial.print("MEM_update PRG_fase=");
@@ -323,8 +344,12 @@ void MEM_update() { //sets new values/ sends CV
 			EEPROM.update(132 + i, ROUTE[i].wissels); //144
 			EEPROM.update(144 + i, ROUTE[i].blokkades); //156
 			EEPROM.update(156 + i, ROUTE[i].melders);//168
-			EEPROM.update(168 + i, ROUTE[i].seinen[0]);
-			EEPROM.update(180 + i, ROUTE[i].seinen[1]);
+			for (byte b = 0; b < 4; b++) {
+				EEPROM.update(300 + i + (b * 12), ROUTE[i].seinen[b]);
+			}
+
+			//EEPROM.update(168 + i, ROUTE[i].seinen[0]);
+			//EEPROM.update(180 + i, ROUTE[i].seinen[1]);
 		}
 		break;
 	}
@@ -429,7 +454,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0;
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0; byte sbyte = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	if (LOC[loc].reg & (1 << 0)) {//dit proces loopt alleen als loc.reg bit 0 = true
@@ -541,7 +566,8 @@ void LOC_exe() {
 				}
 				break;
 			case 12: //set seinen
-				if (~ROUTE[LOC[loc].route].seinen[a] & (1 << LOC[loc].teller)) {
+				if (LOC[loc].reg & (1 << 1))a = 2;
+				if (~ROUTE[LOC[loc].route].seinen[sbyte + a] & (1 << LOC[loc].teller)) {
 					if (GPIOR1 & (1 << 7)) { //false byte 0, true byte 1
 						tmp = LOC[loc].teller + 8;
 					}
@@ -552,6 +578,7 @@ void LOC_exe() {
 				}
 				if (GPIOR1 & (1 << 7)) {
 					GPIOR1 |= (1 << 7);
+					sbyte++; //volgende byte
 				}
 				else {
 					LOC[loc].teller++;
@@ -560,6 +587,7 @@ void LOC_exe() {
 						LOC[loc].teller = 0;
 						LOC[loc].fase = 20;
 						LOC[loc].wait = 5;
+						a = 0;
 					}
 				}
 				break;
@@ -662,15 +690,12 @@ void LOC_exe() {
 						if (~ROUTE[LOC[loc].route].melders & (1 << i))res_station &= ~(1 << i);
 					}
 					//seinen vrijgeven, rood maken
-					for (byte b = 0; b < 2; b++) {
-						for (byte s = 0; s < 8; s++) {
-							if (~ROUTE[LOC[loc].route].seinen[b] & (1 << s)) {
-								//opgenomen sein gevonden
-								//Serial.print("Sein: "); Serial.println(b * 8 + s);
-								SET_sein(b * 8 + s, true);
-							}
-						}
-					}
+					seinoff_dir[loc] = (LOC[loc].reg & (1 << 1)); //richting loc					 
+					seinoff_route[loc] = LOC[loc].route;
+					seinoff_count[loc] = 0;
+					//per loc
+					GPIOR2 |= (1 << loc + 1); //start void SET_seinoff
+
 					LOC[loc].station = LOC[loc].goal;
 					LOC[loc].goal = 0;
 					LOC[loc].fase = 35;
@@ -684,7 +709,7 @@ void LOC_exe() {
 				//stop locomotief
 				LOC[loc].velo = 0; LOC_calc(loc);
 				LOC[loc].fase = 0;
-				LOC[loc].wait = random(10, 100); //station wachttijd
+				LOC[loc].wait = random(5, 50); //station wachttijd
 				break;
 
 			case 101: //begin find starting point (station)	
@@ -731,10 +756,11 @@ void LOC_exe() {
 	//temp_blok = res_blok;
 }
 void SET_sein(byte sein, boolean stand) {
+	Serial.println(sein);
 	if (MEM_reg & (1 << 0)) { //dual stand
+		GPIOR2 |= (1 << 3);
 		sein2 = (sein * 2) + 1;
 		possein2 = !stand;
-		Serial.println("dec1");
 		DCC_acc(true, true, sein * 2, stand);
 		GPIOR1 |= (1 << 5);
 	}
@@ -743,9 +769,28 @@ void SET_sein(byte sein, boolean stand) {
 	}
 }
 void SET_sein2() { //sets 2e sein in dual mode
-	Serial.println("dec2");
 	DCC_acc(true, true, sein2, possein2);
 	GPIOR1 &= ~(1 << 5);
+	GPIOR2 &= ~(1 << 3);
+}
+void SET_seinoff(byte loc) {
+	if (~GPIOR0 & (1 << 2)) {//accessoire programming not free
+		Serial.print("*");
+		byte b = 0; byte d = 0;
+		if (seinoff_dir[loc])d = 2;
+		if (seinoff_count[loc] > 7)b = 1;
+		//schakelt alle seinen in een route voor een specifieke richting weer op rood
+		if (~ROUTE[seinoff_route[loc]].seinen[b + d] & (1 << seinoff_count[loc] - (b * 8))) {
+			Serial.print(seinoff_count[loc]);
+			//sein gevonden
+			SET_sein(seinoff_count[loc], true);
+		}
+		seinoff_count[loc]++;
+		if (seinoff_count[loc] > 15) {
+			GPIOR2 &= ~(1 << 1 + loc); //stop proces for this loc
+			Serial.println("");
+		}
+	}
 }
 void INIT_wissels() {
 	//initialiseert de aangesloten wissels en seinen, false is wissels
@@ -1120,7 +1165,7 @@ void SW_on(byte sw) {
 	}
 }
 void SW_PRG(byte sw) {
-	byte temp;
+	byte b = 0; //bit in sein selectie
 	switch (PRG_level) {
 		//++++++++LEVEL 1
 	case 1:	//Soort instelling	
@@ -1292,15 +1337,20 @@ void SW_PRG(byte sw) {
 				if (prg_sein > 15)prg_sein = 0;
 				break;
 			case 1:
-				if (prg_sein < 8) {
-					ROUTE[rt_sel].seinen[0] ^= (1 << prg_sein);
-				}
-				else {
-					ROUTE[rt_sel].seinen[1] ^= (1 << prg_sein - 8);
-				}
-				Serial.println(ROUTE[rt_sel].seinen[0]);
+				GPIOR2 ^= (1 << 0); //toggle sein/route richting
 				break;
 			case 2:
+				GPIOR2 &= ~(1 << 4);
+				if (~GPIOR2 & (1 << 0))b = 2;
+				if (prg_sein < 8) {
+					ROUTE[rt_sel].seinen[0 + b] ^= (1 << prg_sein);
+					if (ROUTE[rt_sel].seinen[0 + b] & (1 << prg_sein))GPIOR2 |= (1 << 4);
+				}
+				else {
+					ROUTE[rt_sel].seinen[1 + b] ^= (1 << prg_sein - 8);
+					if (ROUTE[rt_sel].seinen[1 + b] & (1 << prg_sein-8))GPIOR2 |= (1 << 4);
+				}				
+				SET_sein(prg_sein, GPIOR2 & (1 << 4));
 				break;
 			case 3:
 				PRG_level++; //naar level 5
@@ -1405,6 +1455,7 @@ void SW_pendel(byte sw) {
 		switch (sw) {
 		case 0:
 			LOC[loc].speed ^= (1 << 5);
+			LOC[loc].reg ^=(1 << 7);
 			break;
 		case 1:
 			LOC[loc].Vmin++;
@@ -1769,6 +1820,7 @@ void DSP_prg() {
 			cd; regel1s; TXT(16); display.print(rt_sel + 1); TXT(200); TXT(9);
 			regel2; display.print(prg_sein + 1);
 
+
 			if (prg_sein < 8) {
 				b = 0;
 				s = prg_sein;
@@ -1778,11 +1830,19 @@ void DSP_prg() {
 				s = prg_sein - 8;
 			}
 
-			if (~ROUTE[rt_sel].seinen[b] & (1 << s)) { //if false bezet
-				display.fillRect(33, 25, 12, 12, WHITE);
+			display.setCursor(32, 23);
+			if (GPIOR2 & (1 << 0)) { //richting route/sein
+				TXT(14); //>				
 			}
 			else {
-				display.drawRect(33, 25, 12, 12, WHITE);
+				TXT(13); //<
+				b = b + 2;
+			}
+			if (~ROUTE[rt_sel].seinen[b] & (1 << s)) { //if false bezet
+				display.fillRect(65, 25, 12, 12, WHITE);
+			}
+			else {
+				display.drawRect(65, 25, 12, 12, WHITE);
 			}
 			buttons = 16;
 			break;
@@ -1959,10 +2019,10 @@ void TXT(byte t) {
 		break;
 
 	case 19:
-		display.print(F("S     *     -    B/M"));  //keuze routes, seinen
+		display.print(F("S    <>    *    B/M"));  //keuze routes, seinen
 		break;
 	case 20:
-		display.print(F("loc   stop    ?    F"));
+		display.print(F("loc   stop    -    F"));
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
@@ -2012,7 +2072,7 @@ void TXT(byte t) {
 		display.print(F("Dual "));
 		break;
 	case 36:
-		display.print(F(">     *     V      X"));  //keuze routes, seinen
+		display.print(F(">     *     V      X"));  //prg diverse seinen mode mono/dual
 		break;
 
 	case 100:
@@ -2035,11 +2095,17 @@ void TXT(byte t) {
 		break;
 	}
 }
-void loop() {	//slow events timer
-	count_slow++;
-	if (count_slow > 12000) { //1200 goede waarde voor deze timer
-		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
+
+void loop() {
+	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
+	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
 		count_slow = 0;
+		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
+		//seinen uit zetten, aan einde route
+		if (~GPIOR2 & (1 << 3)) {
+			if (GPIOR2 & (1 << 1))SET_seinoff(0);
+			if (GPIOR2 & (1 << 2))SET_seinoff(1);
+		}
 		SW_exe(); //switches
 		count_locexe++;
 		if (count_locexe > 10) {
