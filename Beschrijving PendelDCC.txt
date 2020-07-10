@@ -53,6 +53,8 @@ bit6 true lok command, blijven herhalen
 
 MEM_reg
 bit0 seinen decoders dual (1 decoderkanaal voor 1 led, 1 poort gebruiken) true; mono (1 decoderkanaal voor 2 leds, beide poorten gebruiken) false
+bit1 Autostart actief (false) TRue = niet actief
+bit2 Auto stop goed uitgevoerd false, niet goed uitgevoerd = true
 
 Com reg GPIOR0
 bit0	Flag bit half in ISR
@@ -80,6 +82,7 @@ bit1 alle seinen in een route weer op stoppen zetten voor loc 0
 bit2 alle seinen in een route weer op stop loc 1
 bit3 SET_sein in process wachten tot sein is verwerkt voordat volgend sein kan worden gestart.
 bit4 Algemeen boolean
+bit5 Start en Stop actief locs gaan stoppen, stations opslaan, DCC uitschakelen
 bit7 Sein enabled, dcc command in progress
 
 EEPROM adressen
@@ -97,6 +100,10 @@ EEPROM adressen
 196 loc2 functions
 200~223 Vloc, snelheid per route/loc
 250 MEM_reg
+251
+252
+260 LOC[0].station
+261 LOC[1].station
 300~311 routes seinen[0]
 312~323 routes seinen[1]
 324~335 routes seinen[2]

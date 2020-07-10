@@ -3,8 +3,13 @@
 	Created:	2020
 	Author:     Rob Antonisse
 
+Arduino sketch for automated train control.
+Max 2 locomotive, 8 switches, 16 signals and 12 routes
+Project name PenDelDCC.
+S
 
-	Arduino programma voor een pendelautomaat voor digitale DCC locomotieven
+Versions:
+PendelD.ino V1.01 july 2020
 
 */
 
@@ -122,6 +127,10 @@ void setup() {
 	delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+	cd; //clear display
+	regel1s; display.print("www.wisselmotor.nl");
+	regel2; display.print("PenDelDCC");
+	display.display();
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
@@ -147,11 +156,12 @@ void setup() {
 	//init
 	
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
-	DSP_pendel();
+	GPIOR0 |= (1 << 5);//disable DSP update
+	//DSP_pendel();
 }
 void Factory() {
 	//resets EEPROM to default
-	for (byte i = 100; i < 300; i++) {
+	for (byte i = 100; i < 400; i++) {
 		EEPROM.update(i, 0xFF);
 	}
 }
@@ -213,6 +223,9 @@ void MEM_read() {
 		if (LOC[i].adres == 0xFF) {
 			LOC[i].adres = 0x03 + i;
 		}
+		LOC[i].station = EEPROM.read(260+i);
+		if (LOC[i].station == 0xFF)LOC[i].station = 0x00;
+		if (LOC[i].station > 0) res_station |= (1 << LOC[i].station - 1); //reserveer begin stations
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
 		LOC[i].function = EEPROM.read(195 + i);
 		if (LOC[i].function == 0xFF)LOC[i].function = B10010000;
@@ -238,6 +251,7 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_reg = EEPROM.read(250);
+
 	//set start direction forward of locomotive
 	//251 reg loc0 252 reg loc1 
 	//overige bits in reg niet lezen dan gaat het mis
@@ -245,8 +259,6 @@ void MEM_read() {
 	LOC[1].speed = B01100000;
 	LOC[0].reg |= (1 << 7);
 	LOC[1].reg |= (1 << 7);
-
-	//Serial.println(EEPROM.read(251),BIN);
 	if (~EEPROM.read(251) & (1 << 7)) {
 		LOC[0].speed &= ~(1 << 5);
 		LOC[0].reg &=~(1 << 7);
@@ -281,13 +293,9 @@ void MEM_loc_update(byte loc) {
 	EEPROM.update(number, LOC[loc].Vmax);
 	number = 195;
 	EEPROM.update(number, LOC[loc].function);
-
-	//Serial.print("Update: "); Serial.println(LOC[loc].reg, BIN);
 	EEPROM.update(251 + loc, LOC[loc].reg);
 }
 void MEM_update() { //sets new values/ sends CV 
-	//	Serial.print("MEM_update PRG_fase=");
-//	Serial.println(PRG_fase);
 	switch (PRG_fase) {
 	case 0: //DCC adressen
 		switch (PRG_typeDCC) {
@@ -322,8 +330,6 @@ void MEM_update() { //sets new values/ sends CV
 			//alleen uitvoeren als er  niet een CV programming bezig is
 			switch (prg_typecv) {
 			case 0:
-				//if (GPIOR0 & ~(1 << 2)) { //bit2 in GPIOR0 false
-					//Serial.println("CV schrijven");
 				DCC_cv(true, LOC[0].adres, PRG_cvs[0], PRG_cvs[1]);
 				break;
 			case 1://loco 2
@@ -385,7 +391,6 @@ void DCC_write() {
 }
 void DCC_endwrite() {
 	GPIOR1 &= ~(1 << 0);
-	//Serial.println("adres aangepast");
 	GPIOR1 &= ~(1 << 1);
 	DSP_prg();
 }
@@ -393,19 +398,10 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	byte da;	//ws=wissel of sein
 	if (ws) { //true seinen
 		da = dcc_seinen;
-		//Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
-		//Serial.print("adres: "); Serial.print(da); Serial.print("  ");
-		//Serial.print("Poort: "); Serial.println(poort);
-		//Serial.println("*********");
 		while (channel > 3) {
 			da++;
 			channel = channel - 4;
 		}
-		//Serial.print("channel: "); Serial.print(channel); Serial.print("  ");
-		//Serial.print("adres: "); Serial.print(da); Serial.print("  ");
-		//Serial.print("Poort: "); Serial.println(poort);
-		//Serial.println("");
-		//hier nog iets met adres ophoging bij de volgende decoder 
 	}
 	else { //wissels
 		da = dcc_wissels;
@@ -418,9 +414,6 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	dcc_aantalBytes = 2;
 	count_repeat = 4;
 	GPIOR0 |= (1 << 2); //start zenden accessoire	
-
-   // Serial.print("bytes: ");
-	//Serial.print(dcc_data[0], BIN); Serial.print(" "); Serial.print(dcc_data[1], BIN); Serial.print(" "); Serial.println(dcc_data[2], BIN);
 }
 void DCC_accAdres(byte da) {
 	dcc_data[0] = 0x00;
@@ -438,7 +431,6 @@ void DCC_accAdres(byte da) {
 	dcc_data[0] = da; dcc_data[0] |= (1 << 7);
 }
 void LOC_calc(byte loc) {
-	//Serial.println(LOC[loc].speed, BIN);
 	byte speed;
 	if (LOC[loc].velo & (1 << 0)) { //oneven
 		speed = LOC[loc].velo / 2 + 2;
@@ -449,9 +441,7 @@ void LOC_calc(byte loc) {
 	}
 	LOC[loc].speed &= ~(B00011111 << 0); //clear bit 0~4
 	LOC[loc].speed = LOC[loc].speed + speed;
-
-	//vreemde plek?  iedere aanpassing in loc moet zichtbaar worden toch?
-	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //not in prg mode
+	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //only when enabled
 }
 void LOC_exe() {
 	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0; byte sbyte = 0;
@@ -510,21 +500,18 @@ void LOC_exe() {
 					if (ROUTE[route].stationl == LOC[loc].station) goal = ROUTE[route].stationr;
 				}
 				if (goal == 0) break; //uitspringen, geen route gevonden
-				//Serial.println(goal);
 				tmp = 0;
 				//check doelstation, anders switch verlaten
 				if (res_station & (1 << goal - 1)) tmp = 1;
 				//check wissels, of vrij in de route
 				for (byte i = 0; i < 4; i++) {
 					if (~ROUTE[route].wissels & (1 << 7 - i)) { //wissel opgenomen in gewenste route
-						//Serial.println("check wissels");
 						if (res_wissels & (1 << i))tmp = 1; // wissel is bezet, verlaat proces
 					}
 				}
 				//check blokkades en melders die niet bezet mogen zijn
 				for (byte i = 0; i < 8; i++) {
 					if (~ROUTE[route].blokkades & (1 << i)) {
-						//Serial.println("check blokkade");
 						if (res_blok & (1 << i)) tmp = 1; //als blokkade is bezet, verlaat proces
 					}
 					if (~ROUTE[route].melders & (1 << i)) {
@@ -552,8 +539,6 @@ void LOC_exe() {
 				break;
 			case 10: //set en reserveer wissels 
 				if (~ROUTE[LOC[loc].route].wissels & (1 << (7 - LOC[loc].teller))) {  //bit 7~4 
-					//Serial.println("wissel");
-					//res_wissels |= (1 << LOC[loc].teller); //reserveer wissel oude situ voor 30jun wissels direct reserveren niet 1 voor 1 
 					tb = ROUTE[LOC[loc].route].wissels & (1 << (3 - LOC[loc].teller)); //next wissel
 					DCC_acc(false, true, LOC[loc].teller, tb); //set wissel					
 				}
@@ -623,7 +608,6 @@ void LOC_exe() {
 							}
 						}
 						else { //versnellen
-							//Serial.println(ROUTE[LOC[loc].route].Vloc[loc]);
 							if (LOC[loc].vaart < 255) LOC[loc].vaart++; //limit
 							if (LOC[loc].vaart < ROUTE[LOC[loc].route].Vloc[loc]) {
 								//versnellen
@@ -656,13 +640,11 @@ void LOC_exe() {
 					}
 					if (GPIOR1 & (1 << 7)) {
 						//snelheidverschil groot, nieuwe routetijd opslaan in EEPROM
-						Serial.println("opslaan");
 						a = 200 + LOC[loc].route;
 						if (loc == 1)a = a + 12;
 						EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
 					}
 					GPIOR1 &= ~(1 << 7); //release temp boolean
-
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
@@ -709,6 +691,17 @@ void LOC_exe() {
 				//stop locomotief
 				LOC[loc].velo = 0; LOC_calc(loc);
 				LOC[loc].fase = 0;
+				//hier route rijden, testen of auto stop actief is
+				if (GPIOR2 & (1 << 5)) {
+					LOC[loc].reg &= ~(1 << 0); //stop automatisch rijden
+					EEPROM.update(260 + loc, LOC[loc].station);
+					if (~LOC[0].reg & (1 << 0) & ~LOC[1].reg & (1 << 0)) {
+						MEM_reg &= ~(1 << 2); //enable autostart
+						EEPROM.update(250, MEM_reg);			
+						PORTB &= ~(1 << 0); //stop DCC signal
+					}
+					DSP_pendel();
+				}
 				LOC[loc].wait = random(5, 50); //station wachttijd
 				break;
 
@@ -740,7 +733,6 @@ void LOC_exe() {
 				}
 				break;
 			case 200:
-				//Serial.println("stop");
 				LOC[loc].reg &= ~(1 << 0); //stop
 				DSP_pendel();
 				break;
@@ -756,7 +748,6 @@ void LOC_exe() {
 	//temp_blok = res_blok;
 }
 void SET_sein(byte sein, boolean stand) {
-	Serial.println(sein);
 	if (MEM_reg & (1 << 0)) { //dual stand
 		GPIOR2 |= (1 << 3);
 		sein2 = (sein * 2) + 1;
@@ -775,20 +766,16 @@ void SET_sein2() { //sets 2e sein in dual mode
 }
 void SET_seinoff(byte loc) {
 	if (~GPIOR0 & (1 << 2)) {//accessoire programming not free
-		Serial.print("*");
 		byte b = 0; byte d = 0;
 		if (seinoff_dir[loc])d = 2;
 		if (seinoff_count[loc] > 7)b = 1;
 		//schakelt alle seinen in een route voor een specifieke richting weer op rood
 		if (~ROUTE[seinoff_route[loc]].seinen[b + d] & (1 << seinoff_count[loc] - (b * 8))) {
-			Serial.print(seinoff_count[loc]);
-			//sein gevonden
 			SET_sein(seinoff_count[loc], true);
 		}
 		seinoff_count[loc]++;
 		if (seinoff_count[loc] > 15) {
 			GPIOR2 &= ~(1 << 1 + loc); //stop proces for this loc
-			Serial.println("");
 		}
 	}
 }
@@ -802,13 +789,12 @@ void INIT_wissels() {
 		prg_sein++;
 		if (prg_sein > 15) {
 			prg_sein = 0;
-			GPIOR1 |= (1 << 4); //exit init_wissels
+			autostart();
 			GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
 		}
 	}
 	else {
 		//wissels
-	//Serial.println(prg_wissels);
 		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
 		GPIOR1 ^= (1 << 6);
 		if (~GPIOR1 & (1 << 6))prg_wissels++;
@@ -817,6 +803,24 @@ void INIT_wissels() {
 			GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
 		}
 	}
+}
+void autostart() {
+	if (MEM_reg & (1 << 2)) { //autostop niet gelukt, wis stations
+		LOC[0].station = 0;
+		LOC[1].station = 0;
+		res_station = 0;
+	}
+	else { //autostop gelukt
+		if (~MEM_reg & (1 << 1)) { //autostart staat aan
+			if (LOC[0].station > 0)LOC[0].reg |= (1 << 0);
+			if (LOC[1].station > 0)LOC[1].reg |= (1 << 0);
+		}
+	}
+	MEM_reg |= (1 << 2);
+	EEPROM.update(250, MEM_reg);
+GPIOR1 |= (1 << 4); //exit init_wissels
+DSP_pendel(); //1e dsp_pendel na opstarten
+GPIOR0 &= ~(1 << 5); //Enable DSP update
 }
 byte MELDERS() {
 	byte melder;
@@ -848,22 +852,6 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		dcc_data[5] = dcc_data[0] ^ dcc_data[1] ^ dcc_data[2] ^ dcc_data[3] ^ dcc_data[4];
 		dcc_aantalBytes = 5;
 		count_repeat = 4;
-
-		/*
-		Serial.print("bytes: ");
-		Serial.print(dcc_data[0], BIN);
-		Serial.print(" ");
-		Serial.print(dcc_data[1], BIN);
-		Serial.print(" ");
-		Serial.print(dcc_data[2], BIN);
-		Serial.print(" ");
-		Serial.print(dcc_data[3], BIN);
-		Serial.print(" ");
-		Serial.print(dcc_data[4], BIN);
-		Serial.print(" ");
-		Serial.println(dcc_data[5], BIN);
-*/
-
 	}
 }
 void PRG_dec() {
@@ -1080,8 +1068,6 @@ void DCC_command() {
 		dcc_aantalBytes = 2;
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
-	//Serial.print("Send: "); Serial.print(dcc_data[0], BIN); Serial.print("- "); Serial.println(dcc_data[1], BIN);
-	//Serial.println(dcc_data[0],BIN);
 }
 void SW_exe() {
 	byte poort; byte changed; byte temp;
@@ -1239,8 +1225,6 @@ void SW_PRG(byte sw) {
 		break;
 		//+++++++++++++++LEVEL3
 	case 3: //level 3
-		//Serial.print("switch ");
-		//Serial.println(sw);
 		switch (sw) {
 		case 0:
 			PRG_dec();
@@ -1401,6 +1385,9 @@ void SW_pendel(byte sw) {
 			if (LOC[loc].reg & (1 << 0)) {  //start rijden process
 				LOC[loc].fase = 0;
 				LOC[loc].wait = 0;
+				GPIOR2 &= ~(1 << 5); //disable auto stop
+				MEM_reg |= (1 << 2); //disable auto start
+				EEPROM.update(250, MEM_reg);
 			}
 			else { //stop locomotief
 				LOC[loc].velo = 0; LOC_calc(loc);
@@ -1409,6 +1396,7 @@ void SW_pendel(byte sw) {
 		case 2:
 			if (LOC[loc].reg & (1 << 0)) { //loc rijdt
 				//11juni nog geen functie
+				GPIOR2 |= (1 << 5); //auto stop actief
 			}
 			else {//loc staat stil
 				//station kiezen
@@ -1435,7 +1423,6 @@ void SW_pendel(byte sw) {
 		}
 		break;
 	case 1: //PDL_fase 1
-		//Serial.print(loc);
 		switch (sw) {
 		case 0:
 			LOC[loc].function ^= (1 << 4);
@@ -1504,6 +1491,10 @@ void DSP_pendel() {
 		}
 		display.print(LOC[loc].velo);
 		regel2; display.print(LOC[loc].station); TXT(32); display.print(LOC[loc].goal);
+
+		if (GPIOR2 & (1 << 5)) { //s&O ingeschakeld
+			DSP_settxt(100, 40, 1); display.print("Stop");
+		}
 		if (LOC[loc].reg & (1 << 0)) {
 			button = 4;
 		}
@@ -1667,6 +1658,16 @@ void DSP_prg() {
 					TXT(34);
 				}
 				break;
+			case 1:
+				TXT(33); TXT(40); regel2;
+				if (MEM_reg & (1 << 1)) {
+					TXT(42);
+				}
+				else {
+					TXT(41);
+				}
+
+				break;
 			}
 			buttons = 6;
 			break;
@@ -1808,8 +1809,6 @@ void DSP_prg() {
 		break;
 		//**********************LEVEL 4
 	case 4: //level 4
-			//Serial.print("PRG_level:");
-		//Serial.println(PRG_level);
 		switch (PRG_fase) {
 		case 3:
 			TXT_cv3(); TXT(200);
@@ -2022,7 +2021,7 @@ void TXT(byte t) {
 		display.print(F("S    <>    *    B/M"));  //keuze routes, seinen
 		break;
 	case 20:
-		display.print(F("loc   stop    -    F"));
+		display.print(F("loc   stop   S&O   F"));
 		break;
 	case 21:
 		display.print(F(" -     +     V     X"));
@@ -2073,6 +2072,15 @@ void TXT(byte t) {
 		break;
 	case 36:
 		display.print(F(">     *     V      X"));  //prg diverse seinen mode mono/dual
+		break;
+	case 40:
+		display.print(F("autostart "));
+		break;
+	case 41:
+		display.print(F("Aan"));
+		break;
+	case 42:
+		display.print(F("Uit"));
 		break;
 
 	case 100:
