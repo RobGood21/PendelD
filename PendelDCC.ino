@@ -123,6 +123,7 @@ byte rt_sel;
 //byte temp_rss;
 //byte temp_blok;
 //byte temp_wis;
+//byte seinteller;
 void setup() {
 	delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
@@ -154,7 +155,7 @@ void setup() {
 	GPIOR1 &= ~(1 << 4);
 	MEM_read();
 	//init
-	
+
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	GPIOR0 |= (1 << 5);//disable DSP update
 	//DSP_pendel();
@@ -223,7 +224,7 @@ void MEM_read() {
 		if (LOC[i].adres == 0xFF) {
 			LOC[i].adres = 0x03 + i;
 		}
-		LOC[i].station = EEPROM.read(260+i);
+		LOC[i].station = EEPROM.read(260 + i);
 		if (LOC[i].station == 0xFF)LOC[i].station = 0x00;
 		if (LOC[i].station > 0) res_station |= (1 << LOC[i].station - 1); //reserveer begin stations
 		//merk op, update van eeprom is eigenlijk nergens voor nodig.
@@ -255,17 +256,17 @@ void MEM_read() {
 	//set start direction forward of locomotive
 	//251 reg loc0 252 reg loc1 
 	//overige bits in reg niet lezen dan gaat het mis
-	LOC[0].speed = B01100000; 
+	LOC[0].speed = B01100000;
 	LOC[1].speed = B01100000;
 	LOC[0].reg |= (1 << 7);
 	LOC[1].reg |= (1 << 7);
 	if (~EEPROM.read(251) & (1 << 7)) {
 		LOC[0].speed &= ~(1 << 5);
-		LOC[0].reg &=~(1 << 7);
+		LOC[0].reg &= ~(1 << 7);
 	}
 	if (~EEPROM.read(252) & (1 << 7)) {
 		LOC[1].speed &= ~(1 << 5);
-		LOC[1].reg &=~(1 << 7);
+		LOC[1].reg &= ~(1 << 7);
 	}
 	MEM_readroute();
 }
@@ -396,7 +397,7 @@ void DCC_endwrite() {
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	byte da;	//ws=wissel of sein
-	if (ws) { //true seinen
+	if (ws) { //true seinen//
 		da = dcc_seinen;
 		while (channel > 3) {
 			da++;
@@ -444,7 +445,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //only when enabled
 }
 void LOC_exe() {
-	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0; byte sbyte = 0;
+	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0; byte bc = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
 	if (LOC[loc].reg & (1 << 0)) {//dit proces loopt alleen als loc.reg bit 0 = true
@@ -551,30 +552,22 @@ void LOC_exe() {
 				}
 				break;
 			case 12: //set seinen
-				if (LOC[loc].reg & (1 << 1))a = 2;
-				if (~ROUTE[LOC[loc].route].seinen[sbyte + a] & (1 << LOC[loc].teller)) {
-					if (GPIOR1 & (1 << 7)) { //false byte 0, true byte 1
-						tmp = LOC[loc].teller + 8;
-					}
-					else {
-						tmp = LOC[loc].teller;
-					}
-					SET_sein(tmp, false);
+				a = 0; bc = LOC[loc].teller;
+				if (LOC[loc].reg & (1 << 1))a = 2; //richting > byet 0-1 < byte 2-3
+				if (LOC[loc].teller > 7) {
+					a++;
+					bc = bc - 8;
+				}	
+				if (~ROUTE[LOC[loc].route].seinen[a] & (1 << bc)) {
+					SET_sein(LOC[loc].teller, false);
+					//Serial.print("sein: "); Serial.println(LOC[loc].teller);
 				}
-				if (GPIOR1 & (1 << 7)) {
-					GPIOR1 |= (1 << 7);
-					sbyte++; //volgende byte
-				}
-				else {
-					LOC[loc].teller++;
-					GPIOR1 &= ~(1 << 7);
-					if (LOC[loc].teller > 7) { //alle 16 seinen bekeken voor deze route
+				LOC[loc].teller++;
+					if (LOC[loc].teller > 15) { //alle 16 seinen bekeken voor deze route
 						LOC[loc].teller = 0;
 						LOC[loc].fase = 20;
 						LOC[loc].wait = 5;
-						a = 0;
 					}
-				}
 				break;
 			case 20: //drive init
 				LOC[loc].wait = 0;
@@ -697,14 +690,13 @@ void LOC_exe() {
 					EEPROM.update(260 + loc, LOC[loc].station);
 					if (~LOC[0].reg & (1 << 0) & ~LOC[1].reg & (1 << 0)) {
 						MEM_reg &= ~(1 << 2); //enable autostart
-						EEPROM.update(250, MEM_reg);			
+						EEPROM.update(250, MEM_reg);
 						PORTB &= ~(1 << 0); //stop DCC signal
 					}
 					DSP_pendel();
 				}
-				LOC[loc].wait = random(5, 50); //station wachttijd
+				LOC[loc].wait = random(1, 50); //station wachttijd
 				break;
-
 			case 101: //begin find starting point (station)	
 				pos_melders[2] = MELDERS();//leg huidige melders status vast
 				pos_melders[3] = pos_melders[2];
@@ -818,9 +810,10 @@ void autostart() {
 	}
 	MEM_reg |= (1 << 2);
 	EEPROM.update(250, MEM_reg);
-GPIOR1 |= (1 << 4); //exit init_wissels
-DSP_pendel(); //1e dsp_pendel na opstarten
-GPIOR0 &= ~(1 << 5); //Enable DSP update
+	//Serial.println(res_station, BIN);
+	GPIOR1 |= (1 << 4); //exit init_wissels
+	DSP_pendel(); //1e dsp_pendel na opstarten
+	GPIOR0 &= ~(1 << 5); //Enable DSP update
 }
 byte MELDERS() {
 	byte melder;
@@ -1332,8 +1325,8 @@ void SW_PRG(byte sw) {
 				}
 				else {
 					ROUTE[rt_sel].seinen[1 + b] ^= (1 << prg_sein - 8);
-					if (ROUTE[rt_sel].seinen[1 + b] & (1 << prg_sein-8))GPIOR2 |= (1 << 4);
-				}				
+					if (ROUTE[rt_sel].seinen[1 + b] & (1 << prg_sein - 8))GPIOR2 |= (1 << 4);
+				}
 				SET_sein(prg_sein, GPIOR2 & (1 << 4));
 				break;
 			case 3:
@@ -1442,7 +1435,7 @@ void SW_pendel(byte sw) {
 		switch (sw) {
 		case 0:
 			LOC[loc].speed ^= (1 << 5);
-			LOC[loc].reg ^=(1 << 7);
+			LOC[loc].reg ^= (1 << 7);
 			break;
 		case 1:
 			LOC[loc].Vmin++;
@@ -2030,7 +2023,7 @@ void TXT(byte t) {
 		display.print(F("S-    S+     <>    X"));
 		break;
 	case 23:
-		display.print(F(" <    >     []     X"));
+		display.print(F(" <    >     *      X"));
 		break;
 	case 24:
 		display.print(F(" -    -      -     X"));
@@ -2103,7 +2096,6 @@ void TXT(byte t) {
 		break;
 	}
 }
-
 void loop() {
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
 	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
