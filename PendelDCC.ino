@@ -126,7 +126,7 @@ byte rt_sel;
 //byte seinteller;
 void setup() {
 	delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
-	Serial.begin(9600);
+	//Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 	cd; //clear display
 	regel1s; display.print("www.wisselmotor.nl");
@@ -810,15 +810,14 @@ void autostart() {
 	}
 	MEM_reg |= (1 << 2);
 	EEPROM.update(250, MEM_reg);
-	//Serial.println(res_station, BIN);
 	GPIOR1 |= (1 << 4); //exit init_wissels
 	DSP_pendel(); //1e dsp_pendel na opstarten
 	GPIOR0 &= ~(1 << 5); //Enable DSP update
 }
 byte MELDERS() {
 	byte melder;
-	melder = pos_melders[1] << 4;
-	melder = melder + pos_melders[0];
+	melder = pos_melders[0] << 4; //melder 1 en 0 omgekeerd
+	melder = melder + pos_melders[1];
 	return melder;
 }
 void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
@@ -1084,12 +1083,13 @@ void SW_exe() {
 		changed = poort ^ pos_melders[bitRead(PIND, 3)];
 		if (changed > 0) {
 			if (PIND & (1 << 3)) {
-				pos_melders[1] = poort;
+				pos_melders[1] = poort;  //omgekeerd meder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
 			}
 			else {
 				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
 			}
-			if (PRG_fase == 1 & PRG_level == 3)DSP_prg();
+			//Serial.print(pos_melders[0], BIN); Serial.println(pos_melders[1], BIN);
+			if (PRG_fase == 1 & PRG_level == 3)DSP_prg(); //alleen i testmode
 		}
 	}
 	else { //switches on poort C lezen
@@ -2106,7 +2106,7 @@ void loop() {
 			if (GPIOR2 & (1 << 1))SET_seinoff(0);
 			if (GPIOR2 & (1 << 2))SET_seinoff(1);
 		}
-		SW_exe(); //switches
+		SW_exe(); //switches  verplaatst 21/7
 		count_locexe++;
 		if (count_locexe > 10) {
 			if (GPIOR1 & (1 << 5)) { //2e sein decoder to be set
@@ -2124,6 +2124,7 @@ void loop() {
 				}
 			}
 			count_locexe = 0;
+			//SW_exe(); //nieuwe plek 21/7
 		}
 		if (GPIOR1 & (1 << 0))DCC_write(); //writing dcc adres in loc
 		DCC_command();
