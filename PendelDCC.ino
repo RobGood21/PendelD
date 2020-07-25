@@ -111,6 +111,7 @@ byte PRG_typeDCC; //actieve adres
 byte PRG_typeTest; //actieve test
 byte prg_wissels; //actieve wissel
 byte prg_sein; //actief sein 16x
+byte prg_seinoffset;
 byte prg_blokkade;  //active blokkade, weke wordt er aangepast
 byte prg_typecv; //ingestelde waarde op PRG_level 2
 byte prg_diverse;
@@ -252,6 +253,8 @@ void MEM_read() {
 		//EEPROM.update(103, dcc_seinen);
 	}
 	MEM_reg = EEPROM.read(250);
+	prg_seinoffset = EEPROM.read(170);
+	if (prg_seinoffset > 3)prg_seinoffset = 0;
 
 	//set start direction forward of locomotive
 	//251 reg loc0 252 reg loc1 
@@ -399,6 +402,7 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	byte da;	//ws=wissel of sein
 	if (ws) { //true seinen//
 		da = dcc_seinen;
+		channel = channel + prg_seinoffset;
 		while (channel > 3) {
 			da++;
 			channel = channel - 4;
@@ -557,17 +561,17 @@ void LOC_exe() {
 				if (LOC[loc].teller > 7) {
 					a++;
 					bc = bc - 8;
-				}	
+				}
 				if (~ROUTE[LOC[loc].route].seinen[a] & (1 << bc)) {
 					SET_sein(LOC[loc].teller, false);
 					//Serial.print("sein: "); Serial.println(LOC[loc].teller);
 				}
 				LOC[loc].teller++;
-					if (LOC[loc].teller > 15) { //alle 16 seinen bekeken voor deze route
-						LOC[loc].teller = 0;
-						LOC[loc].fase = 20;
-						LOC[loc].wait = 5;
-					}
+				if (LOC[loc].teller > 15) { //alle 16 seinen bekeken voor deze route
+					LOC[loc].teller = 0;
+					LOC[loc].fase = 20;
+					LOC[loc].wait = 5;
+				}
 				break;
 			case 20: //drive init
 				LOC[loc].wait = 0;
@@ -935,7 +939,7 @@ void PRG_dec() {
 		break;
 	case 5: //diverse instellingen tbv MEM_reg
 		prg_diverse++;
-		if (prg_diverse > 1)prg_diverse = 0;
+		if (prg_diverse > 2)prg_diverse = 0;
 		break;
 	}
 }
@@ -1026,7 +1030,15 @@ void PRG_inc() {
 		}
 		break;
 	case 5: //diverse booleans aanpassen in MEM_reg
-		MEM_reg ^= (1 << prg_diverse);
+		switch (prg_diverse) {
+		case 2:
+			prg_seinoffset++;
+			if (prg_seinoffset > 3)prg_seinoffset = 0;
+			break;
+		default:
+			MEM_reg ^= (1 << prg_diverse);
+			break;
+		}
 		break;
 	}
 }
@@ -1197,8 +1209,9 @@ void SW_PRG(byte sw) {
 				ROUTE[rt_sel].stationr++;
 				if (ROUTE[rt_sel].stationr > 8)ROUTE[rt_sel].stationr = 0;
 				break;
-			case 5: //Diverse
+			case 5: //Diverse opslaan
 				EEPROM.update(250, MEM_reg);
+				EEPROM.update(170, prg_seinoffset);
 				PRG_level--;
 				break;
 			}
@@ -1642,7 +1655,7 @@ void DSP_prg() {
 			break;
 		case 5: //Instelling diverse
 			switch (prg_diverse) {
-			case 0:
+			case 0: //sein mono dual
 				TXT(33); TXT(9); regel2;
 				if (MEM_reg & (1 << 0)) {
 					TXT(35);
@@ -1651,7 +1664,7 @@ void DSP_prg() {
 					TXT(34);
 				}
 				break;
-			case 1:
+			case 1: //autostart
 				TXT(33); TXT(40); regel2;
 				if (MEM_reg & (1 << 1)) {
 					TXT(42);
@@ -1659,7 +1672,10 @@ void DSP_prg() {
 				else {
 					TXT(41);
 				}
-
+				break;
+			case 2: //Offset sein 1
+				TXT(33); TXT(1); display.print("S1"); regel2;
+				display.print(dcc_seinen * 4 + prg_seinoffset);
 				break;
 			}
 			buttons = 6;

@@ -95,7 +95,7 @@ EEPROM adressen
 106 Vmax loc1
 107 Vmax loc2
 108~168 data routes
-
+170 Seinoffset, extra to dcc adress
 195 loc1 functions
 196 loc2 functions
 200~223 Vloc, snelheid per route/loc
