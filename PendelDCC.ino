@@ -163,7 +163,7 @@ void setup() {
 }
 void Factory() {
 	//resets EEPROM to default
-	for (byte i = 100; i < 400; i++) {
+	for (int i = 100; i < 400; i++) {
 		EEPROM.update(i, 0xFF);
 	}
 }
@@ -699,7 +699,7 @@ void LOC_exe() {
 					}
 					DSP_pendel();
 				}
-				LOC[loc].wait = random(1, 50); //station wachttijd
+				LOC[loc].wait = random(1, 120); //station wachttijd
 				break;
 			case 101: //begin find starting point (station)	
 				pos_melders[2] = MELDERS();//leg huidige melders status vast
