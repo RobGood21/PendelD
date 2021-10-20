@@ -55,6 +55,10 @@ MEM_reg
 bit0 seinen decoders dual (1 decoderkanaal voor 1 led, 1 poort gebruiken) true; mono (1 decoderkanaal voor 2 leds, beide poorten gebruiken) false
 bit1 Autostart actief (false) TRue = niet actief
 bit2 Auto stop goed uitgevoerd false, niet goed uitgevoerd = true
+bit3
+
+
+
 
 Com reg GPIOR0
 bit0	Flag bit half in ISR

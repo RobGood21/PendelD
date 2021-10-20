@@ -11,6 +11,10 @@ S
 Versions:
 PendelD.ino V1.01 july 2020
 
+Version V2.0  toevoegingen tbv van draaischijf module
+-Version zichtbaar in display welcome
+
+
 */
 
 //libraries
@@ -20,6 +24,7 @@ PendelD.ino V1.01 july 2020
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
+#define version "V2.0"
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
@@ -126,13 +131,17 @@ byte rt_sel;
 //byte temp_wis;
 //byte seinteller;
 void setup() {
-	delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
+	//delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	//Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+	//Openings tekxt
 	cd; //clear display
-	regel1s; display.print("www.wisselmotor.nl");
-	regel2; display.print("PenDelDCC");
+	regel1s; display.print(F("www.wisselmotor.nl"));
+	regel2; display.print(F("PenDelDCC"));
+	DSP_settxt(80, 50, 1); display.print(version);
 	display.display();
+
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
 	PORTC |= (15 << 0); //set pin A0 A1 pull up *****
@@ -156,10 +165,11 @@ void setup() {
 	GPIOR1 &= ~(1 << 4);
 	MEM_read();
 	//init
-
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	GPIOR0 |= (1 << 5);//disable DSP update
-	//DSP_pendel();
+	delay(2000);
+
+
 }
 void Factory() {
 	//resets EEPROM to default
@@ -939,7 +949,7 @@ void PRG_dec() {
 		break;
 	case 5: //diverse instellingen tbv MEM_reg
 		prg_diverse++;
-		if (prg_diverse > 2)prg_diverse = 0;
+		if (prg_diverse > 3)prg_diverse = 0;
 		break;
 	}
 }
@@ -1654,9 +1664,11 @@ void DSP_prg() {
 			buttons = 14;
 			break;
 		case 5: //Instelling diverse
+			TXT(33);
 			switch (prg_diverse) {
 			case 0: //sein mono dual
-				TXT(33); TXT(9); regel2;
+				//TXT(33); 
+				TXT(9); regel2;
 				if (MEM_reg & (1 << 0)) {
 					TXT(35);
 				}
@@ -1665,7 +1677,8 @@ void DSP_prg() {
 				}
 				break;
 			case 1: //autostart
-				TXT(33); TXT(40); regel2;
+				//TXT(33); 
+				TXT(40); regel2;
 				if (MEM_reg & (1 << 1)) {
 					TXT(42);
 				}
@@ -1674,8 +1687,12 @@ void DSP_prg() {
 				}
 				break;
 			case 2: //Offset sein 1
-				TXT(33); TXT(1); display.print("S1"); regel2;
+				//TXT(33); 
+				TXT(1); display.print("S1"); regel2;
 				display.print(dcc_seinen * 4 + prg_seinoffset);
+				break;
+			case 3: //mode melder 8
+				display.print(F("mode M8"));
 				break;
 			}
 			buttons = 6;
