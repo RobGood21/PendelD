@@ -167,9 +167,7 @@ void setup() {
 	//init
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	GPIOR0 |= (1 << 5);//disable DSP update
-	delay(2000);
-
-
+	//delay(2000);
 }
 void Factory() {
 	//resets EEPROM to default
@@ -655,10 +653,10 @@ void LOC_exe() {
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 5;
+						LOC[loc].wait = 20; //tijd van doorrijden??? was 5
 						break;
 					case 2:
-						LOC[loc].wait = 2;
+						LOC[loc].wait = 5;
 						break;
 					case 3:
 						LOC[loc].wait = 1;
@@ -709,7 +707,7 @@ void LOC_exe() {
 					}
 					DSP_pendel();
 				}
-				LOC[loc].wait = random(1, 120); //station wachttijd
+				LOC[loc].wait = random(1, 10); //station wachttijd 120 DEBUG LAGE WAARDE
 				break;
 			case 101: //begin find starting point (station)	
 				pos_melders[2] = MELDERS();//leg huidige melders status vast
@@ -1240,13 +1238,13 @@ void SW_PRG(byte sw) {
 		}
 		break;
 		//+++++++++++++++LEVEL3
-	case 3: //level 3
+	case 3: //level 3 
 		switch (sw) {
-		case 0:
-			PRG_dec();
+		case 0: //knop1
+			PRG_dec(); 
 			break;
-		case 1:
-			PRG_inc();
+		case 1: //knop 2
+			PRG_inc(); 
 			break;
 		case 2:
 			switch (PRG_fase) {
@@ -1692,7 +1690,13 @@ void DSP_prg() {
 				display.print(dcc_seinen * 4 + prg_seinoffset);
 				break;
 			case 3: //mode melder 8
-				display.print(F("mode M8"));
+				display.print(F("mode M8")); regel2;
+				if (MEM_reg & (1 << 3)) { //default M8 as melder 8
+					TXT(43);
+				}
+				else { //M8 as setting accessoires are ready (M8 true)
+					TXT(44);
+				}
 				break;
 			}
 			buttons = 6;
@@ -2107,6 +2111,12 @@ void TXT(byte t) {
 		break;
 	case 42:
 		display.print(F("Uit"));
+		break;
+	case 43:
+		display.print(F("Melder 8"));
+		break;
+	case 44:
+		display.print(F("Acc Ready"));
 		break;
 
 	case 100:
