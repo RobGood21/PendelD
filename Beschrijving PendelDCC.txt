@@ -55,7 +55,8 @@ MEM_reg
 bit0 seinen decoders dual (1 decoderkanaal voor 1 led, 1 poort gebruiken) true; mono (1 decoderkanaal voor 2 leds, beide poorten gebruiken) false
 bit1 Autostart actief (false) TRue = niet actief
 bit2 Auto stop goed uitgevoerd false, niet goed uitgevoerd = true
-bit3
+bit3 true: M8=melder 8 false: M8= accessoire ready, M8 true gaan locs rijden (alleen de start) 
+bit4 true: Slot UIT bv.servoos false: slot aan	
 
 
 
@@ -104,7 +105,7 @@ EEPROM adressen
 196 loc2 functions
 200~223 Vloc, snelheid per route/loc
 250 MEM_reg
-251
+251 
 252
 260 LOC[0].station
 261 LOC[1].station
@@ -112,3 +113,6 @@ EEPROM adressen
 312~323 routes seinen[1]
 324~335 routes seinen[2]
 336~347 routes seinen[3]
+tbv versie 2.0
+400 loc1 drf 
+401 loc2 drf

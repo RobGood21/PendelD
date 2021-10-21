@@ -11,9 +11,11 @@ S
 Versions:
 PendelD.ino V1.01 july 2020
 
-Version V2.0  toevoegingen tbv van draaischijf module
+Version V2.01  toevoegingen tbv van draaischijf module
 -Version zichtbaar in display welcome
-
+-in diverse. Nieuwe instelling voor M8 als melder 8 of als acc rdy  (accessoire ready) geeft aan dat accessoire(s) klaar
+zijn met instellen. Als klaar dan is M8 HOOG. 
+-In diverse:  Doorrijden na melder instellen als factor 'drf'
 
 */
 
@@ -24,7 +26,7 @@ Version V2.0  toevoegingen tbv van draaischijf module
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V2.0"
+#define version "V2.01"
 #define cd display.clearDisplay()
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
@@ -61,6 +63,7 @@ struct LOC {
 	byte teller; //universele teller, oa voor wissels instellen
 	byte slowcount; //hoe lang rijd loc in vmin
 	int wait; //ingestelde wachttijd
+	byte drf; //=door rijden factor 
 	unsigned int count;
 }LOC[2];
 
@@ -132,7 +135,7 @@ byte rt_sel;
 //byte seinteller;
 void setup() {
 	//delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
-	//Serial.begin(9600);
+	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
 	//Openings tekxt
@@ -228,7 +231,8 @@ void MEM_read() {
 	LOC[0].speed = B01100000; //set start direction forward of locomotive
 	LOC[1].speed = B01100000;
 	byte a;
-	for (byte i = 0; i < 2; i++) {
+
+	for (byte i = 0; i < 2; i++) { //loc data ophalen
 		LOC[i].adres = EEPROM.read(100 + i);
 		if (LOC[i].adres == 0xFF) {
 			LOC[i].adres = 0x03 + i;
@@ -243,6 +247,10 @@ void MEM_read() {
 		if (LOC[i].Vmin > 10)LOC[i].Vmin = 1;
 		LOC[i].Vmax = EEPROM.read(106 + i);
 		if (LOC[i].Vmax > 28)LOC[i].Vmax = 28;
+
+		LOC[i].drf = EEPROM.read(400 + i);
+		if (LOC[i].drf > 12)LOC[i].drf = 1;
+
 		//Vlocs, snelheid laden per route
 		for (byte y = 0; y < 12; y++) {
 			a = y; if (i == 1)a = a + 12;
@@ -250,6 +258,8 @@ void MEM_read() {
 			if (ROUTE[y].Vloc[i] == 0xFF)ROUTE[y].Vloc[i] = 5;
 		}
 	}
+
+
 	dcc_wissels = EEPROM.read(102);
 	if (dcc_wissels == 0xFF) {
 		dcc_wissels = 1; //default =1
@@ -384,7 +394,6 @@ void MEM_cancel() { //cancels, recalls value
 		MEM_readroute();
 		break;
 	}
-
 }
 void DCC_write() {
 	//writes loc adress in locomotive
@@ -582,14 +591,24 @@ void LOC_exe() {
 				}
 				break;
 			case 20: //drive init
-				LOC[loc].wait = 0;
-				LOC[loc].velo = LOC[loc].Vmin; LOC_calc(loc);
-				LOC[loc].vaart = LOC[loc].velo;
-				LOC[loc].fase = 25;
-				LOC[loc].reg &= ~(1 << 3); //versnellen
-				LOC[loc].teller = 0;
-				LOC[loc].acc = 4;
-				LOC[loc].slowcount = 0;
+				//Serial.println(pos_melders[0],BIN);
+
+				//als in accessoire ready mode bit3 van pos_melder[0] hoog
+				if (~MEM_reg & (1 << 3) && pos_melders[0] & (1<<3)) { //8 als accessoire ready
+					Serial.println("wacht");
+					LOC[loc].wait = 5;
+				}
+				else {
+
+					LOC[loc].wait = 0;
+					LOC[loc].velo = LOC[loc].Vmin; LOC_calc(loc);
+					LOC[loc].vaart = LOC[loc].velo;
+					LOC[loc].fase = 25;
+					LOC[loc].reg &= ~(1 << 3); //versnellen
+					LOC[loc].teller = 0;
+					LOC[loc].acc = 4;
+					LOC[loc].slowcount = 0;
+				}
 				break;
 			case 25:
 				//test of doelstation is bereikt,  is weer vrij
@@ -653,13 +672,13 @@ void LOC_exe() {
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 20; //tijd van doorrijden??? was 5
+						LOC[loc].wait = LOC[loc].drf * 4; //tijd van doorrijden??? was 5
 						break;
 					case 2:
-						LOC[loc].wait = 5;
+						LOC[loc].wait = LOC[loc].drf * 2;
 						break;
 					case 3:
-						LOC[loc].wait = 1;
+						LOC[loc].wait = LOC[loc].drf;
 						break;
 
 					default:
@@ -947,7 +966,7 @@ void PRG_dec() {
 		break;
 	case 5: //diverse instellingen tbv MEM_reg
 		prg_diverse++;
-		if (prg_diverse > 3)prg_diverse = 0;
+		if (prg_diverse > 6)prg_diverse = 0;
 		break;
 	}
 }
@@ -1037,13 +1056,30 @@ void PRG_inc() {
 			break;
 		}
 		break;
-	case 5: //diverse booleans aanpassen in MEM_reg
+	case 5: //diverse instellingen aanpassen o.a.in MEM_reg
+
 		switch (prg_diverse) {
+
 		case 2:
 			prg_seinoffset++;
 			if (prg_seinoffset > 3)prg_seinoffset = 0;
 			break;
-		default:
+		//case 3:
+		//	MEM_reg ^= (1 << 3);
+		//	break;
+		case 4://drf loc1
+			LOC[0].drf++;
+			if (LOC[0].drf > 12)LOC[0].drf = 1;
+			break;
+		case 5: //drf loc2
+			LOC[1].drf++;
+			if (LOC[1].drf > 12)LOC[1].drf = 1;
+			break;
+		case 6:
+			MEM_reg ^= (1 << 4);
+			break;
+
+		default: //MEM_reg booleans
 			MEM_reg ^= (1 << prg_diverse);
 			break;
 		}
@@ -1156,6 +1192,7 @@ void SW_on(byte sw) {
 		}
 		break;
 	}
+
 	if (GPIOR0 & (1 << 5)) { //programmode, kan misschien met checken prg_level?
 		SW_PRG(sw);
 	}
@@ -1220,6 +1257,8 @@ void SW_PRG(byte sw) {
 			case 5: //Diverse opslaan
 				EEPROM.update(250, MEM_reg);
 				EEPROM.update(170, prg_seinoffset);
+				EEPROM.update(400, LOC[0].drf);
+				EEPROM.update(401, LOC[1].drf);
 				PRG_level--;
 				break;
 			}
@@ -1241,10 +1280,10 @@ void SW_PRG(byte sw) {
 	case 3: //level 3 
 		switch (sw) {
 		case 0: //knop1
-			PRG_dec(); 
+			PRG_dec();
 			break;
 		case 1: //knop 2
-			PRG_inc(); 
+			PRG_inc();
 			break;
 		case 2:
 			switch (PRG_fase) {
@@ -1698,6 +1737,23 @@ void DSP_prg() {
 					TXT(44);
 				}
 				break;
+			case 4: //drf loc1 drf=door rijden factor
+				TXT(45); TXT(2); TXT(101); regel2;
+				display.print(LOC[0].drf);
+				break;
+			case 5: //drf loc 2
+				TXT(45); TXT(2); TXT(102); regel2;
+				display.print(LOC[1].drf);
+				break;
+			case 6: //lock default off, aansturen DCC adres wissels=1 voor bv. servo
+				TXT(46); regel2;
+				if (MEM_reg & (1 << 4)) {
+					TXT(42); //uit
+				}
+				else {
+					TXT(41); //aan
+				}
+				break;
 			}
 			buttons = 6;
 			break;
@@ -2118,7 +2174,12 @@ void TXT(byte t) {
 	case 44:
 		display.print(F("Acc Ready"));
 		break;
-
+	case 45:
+		display.print(F("Drf "));
+		break;
+	case 46:
+		display.print(F("Slot"));
+		break;
 	case 100:
 		display.print(F("0 "));
 		break;
