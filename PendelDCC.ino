@@ -682,15 +682,15 @@ void LOC_exe() {
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 3 * LOC[loc].drf; //tijd van doorrijden??? was 5
+						LOC[loc].wait = 5 * LOC[loc].drf; //tijd van doorrijden??? was 5
 						break;
 					case 2:
-						LOC[loc].velo = 1;
+						LOC[loc].velo = 1; LOC_calc(loc);
 						LOC[loc].wait = 3 * LOC[loc].drf;
 						break;
 					case 3:
-						LOC[loc].velo = 1;
-						LOC[loc].wait = 2*LOC[loc].drf;
+						LOC[loc].velo = 1; LOC_calc(loc);
+						LOC[loc].wait = 2 * LOC[loc].drf;
 						break;
 
 					default:
@@ -2245,31 +2245,30 @@ void loop() {
 
 		SW_exe(); //switches  verplaatst 21/7
 
-			//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant
+			//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant, bit 7 oude stand
 			//hier de servo aansturing
 		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
 			count_slot++;
-			if (count_slot > 200) {
+			if (count_slot > 50) {
 				count_slot = 0;
 				//Serial.println(MELDERS(), BIN);
 				if (MELDERS() & (1 << 7)) {
-					slotstatus = 1;
+					if(slotstatus & (1<<7))slotstatus = B00000001;
 				}
 				else {
-					slotstatus = 3;
+					if (~slotstatus & (1 << 7))slotstatus = B10000011;
 				}
 			}
 		}
 
 		if (slotstatus & (1 << 0)) { //bit0 true servoos omzetten
-			//Serial.println(slotstatus);
 			if (~GPIOR0 & (1 << 2)) { //DCC_command is klaar met verzenden vorig command
-				byte s = 4;
+				byte s = 4; //wordt gebruikt als  channel dus channel 1 van volgend decoderadres
 				if (slotstatus & (1 << 2))s++;
 				DCC_acc(false, true, s, slotstatus & (1 << 1));
 				//wissel, aan, channel 4(dus volgend decoderadres) + 0 of 1, rechtdoor of afslaand.
 				slotstatus ^= (1 << 2);  //volgende servo 
-				if (~slotstatus & (1 << 2))slotstatus = 0; //klaar, slot, servos zetten verlaten 
+				if (~slotstatus & (1 << 2))slotstatus &=~(15 << 0); //klaar, slot, servos zetten verlaten 
 			}
 		}
 
