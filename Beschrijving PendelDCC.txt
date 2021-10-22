@@ -116,3 +116,4 @@ EEPROM adressen
 tbv versie 2.0
 400 loc1 drf 
 401 loc2 drf
+410 stopTijd

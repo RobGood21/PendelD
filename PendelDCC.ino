@@ -14,7 +14,7 @@ PendelD.ino V1.01 july 2020
 Version V2.01  toevoegingen tbv van draaischijf module
 -Version zichtbaar in display welcome
 -in diverse. Nieuwe instelling voor M8 als melder 8 of als acc rdy  (accessoire ready) geeft aan dat accessoire(s) klaar
-zijn met instellen. Als klaar dan is M8 HOOG. 
+zijn met instellen. Als klaar dan is M8 HOOG.
 -In diverse:  Doorrijden na melder instellen als factor 'drf'
 
 */
@@ -81,6 +81,7 @@ struct route {
 } ROUTE[12];
 //reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
 //rest van de locks altijd vrij bij starten.
+
 byte res_station;
 byte res_wissels;
 byte res_blok;
@@ -128,11 +129,11 @@ byte PRG_cvs[2]; //0=CV 1=waarde
 //pendel mode
 byte PDL_fase;
 byte rt_sel;
-//temps 
-//byte temp_rss;
-//byte temp_blok;
-//byte temp_wis;
-//byte seinteller;
+byte slotstatus = 0; //bit0 uitvoeren bit1 aan of uit bit2 eerste of tweede servo, kant
+byte stoptijd;
+byte count_slot;
+
+
 void setup() {
 	//delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
@@ -258,8 +259,6 @@ void MEM_read() {
 			if (ROUTE[y].Vloc[i] == 0xFF)ROUTE[y].Vloc[i] = 5;
 		}
 	}
-
-
 	dcc_wissels = EEPROM.read(102);
 	if (dcc_wissels == 0xFF) {
 		dcc_wissels = 1; //default =1
@@ -273,6 +272,9 @@ void MEM_read() {
 	MEM_reg = EEPROM.read(250);
 	prg_seinoffset = EEPROM.read(170);
 	if (prg_seinoffset > 3)prg_seinoffset = 0;
+	stoptijd = EEPROM.read(410); //stoptijd
+	if (stoptijd > 250)stoptijd = 10;
+
 
 	//set start direction forward of locomotive
 	//251 reg loc0 252 reg loc1 
@@ -416,18 +418,25 @@ void DCC_endwrite() {
 	DSP_prg();
 }
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
+	//channel als 4 dan 1e van opvolgend decoderadres als 5 2e 
 	byte da;	//ws=wissel of sein
 	if (ws) { //true seinen//
 		da = dcc_seinen;
 		channel = channel + prg_seinoffset;
-		while (channel > 3) {
-			da++;
-			channel = channel - 4;
-		}
+
+		//while (channel > 3) {  //versie 2.01 geldig ook voor wissels (mogelijk maken wissel 5 en wissel 6 slot)
+		//	da++;
+		//	channel = channel - 4;
+		//}
 	}
 	else { //wissels
 		da = dcc_wissels;
 	}
+	while (channel > 3) {
+		da++;
+		channel = channel - 4;
+	}
+
 	DCC_accAdres(da);
 	if (onoff)dcc_data[1] |= (1 << 3);
 	dcc_data[1] |= (channel << 1);
@@ -437,6 +446,7 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	count_repeat = 4;
 	GPIOR0 |= (1 << 2); //start zenden accessoire	
 }
+
 void DCC_accAdres(byte da) {
 	dcc_data[0] = 0x00;
 	dcc_data[1] = B11110001;
@@ -594,8 +604,8 @@ void LOC_exe() {
 				//Serial.println(pos_melders[0],BIN);
 
 				//als in accessoire ready mode bit3 van pos_melder[0] hoog
-				if (~MEM_reg & (1 << 3) && pos_melders[0] & (1<<3)) { //8 als accessoire ready
-					Serial.println("wacht");
+				if (~MEM_reg & (1 << 3) && pos_melders[0] & (1 << 3)) { //8 als accessoire ready
+					//Serial.println("wacht");
 					LOC[loc].wait = 5;
 				}
 				else {
@@ -672,13 +682,15 @@ void LOC_exe() {
 					//restsnelheid bepalen, doorrijden					
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = LOC[loc].drf * 4; //tijd van doorrijden??? was 5
+						LOC[loc].wait = 3 * LOC[loc].drf; //tijd van doorrijden??? was 5
 						break;
 					case 2:
-						LOC[loc].wait = LOC[loc].drf * 2;
+						LOC[loc].velo = 1;
+						LOC[loc].wait = 3 * LOC[loc].drf;
 						break;
 					case 3:
-						LOC[loc].wait = LOC[loc].drf;
+						LOC[loc].velo = 1;
+						LOC[loc].wait = 2*LOC[loc].drf;
 						break;
 
 					default:
@@ -726,7 +738,7 @@ void LOC_exe() {
 					}
 					DSP_pendel();
 				}
-				LOC[loc].wait = random(1, 10); //station wachttijd 120 DEBUG LAGE WAARDE
+				LOC[loc].wait = random(1, 2 + (10 * stoptijd)); //station wachttijd 120 DEBUG LAGE WAARDE
 				break;
 			case 101: //begin find starting point (station)	
 				pos_melders[2] = MELDERS();//leg huidige melders status vast
@@ -806,27 +818,29 @@ void INIT_wissels() {
 	//initialiseert de aangesloten wissels en seinen, false is wissels
 	if (GPIOR0 & (1 << 2)) return;//als verwerken vorige DCC commando klaar is
 
-	if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
+	//if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
 		//seinen
-		SET_sein(prg_sein, true);
-		prg_sein++;
-		if (prg_sein > 15) {
-			prg_sein = 0;
-			autostart();
-			GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
-		}
+	SET_sein(prg_sein, true);
+	prg_sein++;
+	if (prg_sein > 15) {
+		prg_sein = 0;
+		autostart();
+		GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
 	}
-	else {
-		//wissels
-		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
-		GPIOR1 ^= (1 << 6);
-		if (~GPIOR1 & (1 << 6))prg_wissels++;
-		if (prg_wissels > 4) {
-			prg_wissels = 0;
-			GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
-		}
-	}
+	//}
+	//else {
+		//wissels telkens 1 wissel
+		//DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
+		//DCC_acc(false, true, prg_wissels, false); //V2.01 wissels 1 kant uit
+		//GPIOR1 ^= (1 << 6);
+		//if (~GPIOR1 & (1 << 6))prg_wissels++;
+		//if (prg_wissels > 4) {
+		//	prg_wissels = 0;
+		//	GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
+		//}
+	//}
 }
+
 void autostart() {
 	if (MEM_reg & (1 << 2)) { //autostop niet gelukt, wis stations
 		LOC[0].station = 0;
@@ -966,7 +980,7 @@ void PRG_dec() {
 		break;
 	case 5: //diverse instellingen tbv MEM_reg
 		prg_diverse++;
-		if (prg_diverse > 6)prg_diverse = 0;
+		if (prg_diverse > 7)prg_diverse = 0;
 		break;
 	}
 }
@@ -1064,9 +1078,6 @@ void PRG_inc() {
 			prg_seinoffset++;
 			if (prg_seinoffset > 3)prg_seinoffset = 0;
 			break;
-		//case 3:
-		//	MEM_reg ^= (1 << 3);
-		//	break;
 		case 4://drf loc1
 			LOC[0].drf++;
 			if (LOC[0].drf > 12)LOC[0].drf = 1;
@@ -1077,6 +1088,9 @@ void PRG_inc() {
 			break;
 		case 6:
 			MEM_reg ^= (1 << 4);
+			break;
+		case 7: //stoptijd gaat met 10 vermedigvuldig
+			stoptijd++; if (stoptijd > 20)stoptijd = 0;
 			break;
 
 		default: //MEM_reg booleans
@@ -1143,8 +1157,18 @@ void SW_exe() {
 			}
 			else {
 				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+
+			//	if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
+			//		if (changed & (1 << 3)) { //bit3 veranderd, M8
+			//			if (poort & (1 << 3)) {
+			//				slotstatus = 1; //schakeld in loop de 2 dcc adressen voor het slot
+			//			}
+			//			else {
+			//				slotstatus = 3;
+			//			}
+			//		}
+			//	}
 			}
-			//Serial.print(pos_melders[0], BIN); Serial.println(pos_melders[1], BIN);
 			if (PRG_fase == 1 & PRG_level == 3)DSP_prg(); //alleen i testmode
 		}
 	}
@@ -1259,6 +1283,7 @@ void SW_PRG(byte sw) {
 				EEPROM.update(170, prg_seinoffset);
 				EEPROM.update(400, LOC[0].drf);
 				EEPROM.update(401, LOC[1].drf);
+				EEPROM.update(410, stoptijd);
 				PRG_level--;
 				break;
 			}
@@ -1754,6 +1779,10 @@ void DSP_prg() {
 					TXT(41); //aan
 				}
 				break;
+			case 7: //max wachttijd
+				TXT(47); regel2;
+				display.print(stoptijd);
+				break;
 			}
 			buttons = 6;
 			break;
@@ -2160,7 +2189,7 @@ void TXT(byte t) {
 		display.print(F(">     *     V      X"));  //prg diverse seinen mode mono/dual
 		break;
 	case 40:
-		display.print(F("autostart "));
+		display.print(F("auto "));
 		break;
 	case 41:
 		display.print(F("Aan"));
@@ -2179,6 +2208,9 @@ void TXT(byte t) {
 		break;
 	case 46:
 		display.print(F("Slot"));
+		break;
+	case 47:
+		display.print(F("Stoptijd"));
 		break;
 	case 100:
 		display.print(F("0 "));
@@ -2210,26 +2242,62 @@ void loop() {
 			if (GPIOR2 & (1 << 1))SET_seinoff(0);
 			if (GPIOR2 & (1 << 2))SET_seinoff(1);
 		}
+
 		SW_exe(); //switches  verplaatst 21/7
-		count_locexe++;
-		if (count_locexe > 10) {
-			if (GPIOR1 & (1 << 5)) { //2e sein decoder to be set
-				//wait for accessoire sending is ready
-				if (~GPIOR0 & (1 << 2)) {
-					SET_sein2();
-				}
-			}
-			else {
-				if (GPIOR1 & (1 << 4)) {
-					LOC_exe();
+
+			//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant
+			//hier de servo aansturing
+		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
+			count_slot++;
+			if (count_slot > 200) {
+				count_slot = 0;
+				//Serial.println(MELDERS(), BIN);
+				if (MELDERS() & (1 << 7)) {
+					slotstatus = 1;
 				}
 				else {
-					INIT_wissels();
+					slotstatus = 3;
 				}
 			}
-			count_locexe = 0;
-			//SW_exe(); //nieuwe plek 21/7
 		}
+
+		if (slotstatus & (1 << 0)) { //bit0 true servoos omzetten
+			//Serial.println(slotstatus);
+			if (~GPIOR0 & (1 << 2)) { //DCC_command is klaar met verzenden vorig command
+				byte s = 4;
+				if (slotstatus & (1 << 2))s++;
+				DCC_acc(false, true, s, slotstatus & (1 << 1));
+				//wissel, aan, channel 4(dus volgend decoderadres) + 0 of 1, rechtdoor of afslaand.
+				slotstatus ^= (1 << 2);  //volgende servo 
+				if (~slotstatus & (1 << 2))slotstatus = 0; //klaar, slot, servos zetten verlaten 
+			}
+		}
+
+		else {
+			count_locexe++;
+			if (count_locexe > 10) {
+
+				if (GPIOR1 & (1 << 5)) { //2e sein decoder to be set
+					//wait for accessoire sending is ready
+					if (~GPIOR0 & (1 << 2)) {
+						SET_sein2();
+					}
+				}
+				else {
+					if (GPIOR1 & (1 << 4)) {
+						LOC_exe();
+					}
+					else {
+						INIT_wissels();
+					}
+				}
+
+				count_locexe = 0;
+				//SW_exe(); //nieuwe plek 21/7
+			}
+
+		} //slotstatus
+
 		if (GPIOR1 & (1 << 0))DCC_write(); //writing dcc adres in loc
 		DCC_command();
 		dcc_fase = 1;
