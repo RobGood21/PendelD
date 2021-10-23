@@ -15,8 +15,9 @@ Version V2.01  toevoegingen tbv van draaischijf module
 -Version zichtbaar in display welcome
 -in diverse. Nieuwe instelling voor M8 als melder 8 of als acc rdy  (accessoire ready) geeft aan dat accessoire(s) klaar
 zijn met instellen. Als klaar dan is M8 HOOG.
--In diverse:  Doorrijden na melder instellen als factor 'drf'
-
+-In diverse:  Doorrijden na melder instellen als factor 'drf' per locomotief
+-In diverse Slot stuurt 2 DCC accessoires aan als M8 wordt geactiveerd, voor grendelen of spoorweg bomen.
+-In diverse Stoptijd, limiteerd de max wachttijd tussen twee ritten
 */
 
 //libraries
@@ -26,16 +27,18 @@ zijn met instellen. Als klaar dan is M8 HOOG.
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V2.01"
-#define cd display.clearDisplay()
+#define version "V2.01" //tonen tijdens opstarten
+#define cd display.clearDisplay() //verkorte txt
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
 #define regel3 DSP_settxt(10,23,2) //value tweede regel groot
 #define regel1s DSP_settxt(0, 2, 1) //value eerste regel klein
 #define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
-Adafruit_SSD1306 display(128, 64, &Wire, -1);
-#define TrueBit OCR2A = 115
-#define FalseBit OCR2A = 230
+
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1); //constructor display
+#define TrueBit OCR2A = 115 //pulsduur true bit
+#define FalseBit OCR2A = 230 //pulsduur false  bit
 
 //declarations, 
 //struct's
@@ -68,9 +71,6 @@ struct LOC {
 }LOC[2];
 
 struct route {
-	//byte reg; //registers
-	/*bit0 richting.... ?????   nodig??
-	*/
 	byte stationl;
 	byte stationr;
 	byte wissels; //bit7~4 geblokkeert voor route, 3~0 richting wissels 7-3 wissel1 6-2 wissel2, 5-1 wissel3; 4-0 wissel4 
@@ -79,12 +79,10 @@ struct route {
 	byte melders; //melders die niet bezet mogen zijn in een route (stations die worden overgeslagen, kan een loc op staan)
 	byte Vloc[2];
 } ROUTE[12];
-//reserved items, niet in EEPROM, bij opstarten stations reserveren aan de hand van opgeslagen posities in EEPROM
-//rest van de locks altijd vrij bij starten.
 
-byte res_station;
-byte res_wissels;
-byte res_blok;
+byte res_station; //gereserveerd station
+byte res_wissels; //idem wissels
+byte res_blok; //idem blok
 //count tellers, 
 byte count_preample;
 byte count_byte;
@@ -94,6 +92,9 @@ int count_slow;
 byte count_wa; //write adres
 byte count_command;
 byte count_locexe;
+byte count_slot;
+
+
 byte dcc_fase;
 byte dcc_data[6]; //bevat te verzenden DCC bytes, current DCC commando
 byte dcc_aantalBytes; //aantal bytes current van het DCC commando
@@ -131,11 +132,8 @@ byte PDL_fase;
 byte rt_sel;
 byte slotstatus = 0; //bit0 uitvoeren bit1 aan of uit bit2 eerste of tweede servo, kant
 byte stoptijd;
-byte count_slot;
-
 
 void setup() {
-	//delay(4000); //wissels en accesoires moeten ook hardware matig opstarten, bij gelijk aanzetten van de voedingsspanning ontstaan problemen.
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
@@ -171,7 +169,7 @@ void setup() {
 	//init
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
 	GPIOR0 |= (1 << 5);//disable DSP update
-	//delay(2000);
+	//delay(1000); //is dit wel nodig??? kijken met grote demo, 
 }
 void Factory() {
 	//resets EEPROM to default
@@ -223,7 +221,6 @@ ISR(TIMER2_COMPA_vect) {
 			break;
 		}
 	}
-
 	//check for short
 	//if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
 	sei();
@@ -420,34 +417,28 @@ void DCC_endwrite() {
 void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	//channel als 4 dan 1e van opvolgend decoderadres als 5 2e 
 	byte da;	//ws=wissel of sein
-	if (ws) { //true seinen//
-		da = dcc_seinen;
-		channel = channel + prg_seinoffset;
-
-		//while (channel > 3) {  //versie 2.01 geldig ook voor wissels (mogelijk maken wissel 5 en wissel 6 slot)
-		//	da++;
-		//	channel = channel - 4;
-		//}
+	if (ws) { //true seinen
+		da = dcc_seinen; //DCC adres ophalen 
+		channel = channel + prg_seinoffset; //waarde geeft aan welke van de 32 dcc adressen voor de seinen
 	}
 	else { //wissels
 		da = dcc_wissels;
 	}
-	while (channel > 3) {
+	while (channel > 3) { //bereken ds als het decoderadres
 		da++;
-		channel = channel - 4;
+		channel = channel - 4; //rest is channel in berekende decoder adres
 	}
-
-	DCC_accAdres(da);
-	if (onoff)dcc_data[1] |= (1 << 3);
-	dcc_data[1] |= (channel << 1);
-	if (poort)dcc_data[1] &= ~(1 << 0);
-	dcc_data[2] = dcc_data[0] ^ dcc_data[1];
-	dcc_aantalBytes = 2;
-	count_repeat = 4;
-	GPIOR0 |= (1 << 2); //start zenden accessoire	
+	DCC_accAdres(da); //plaats adres in te verzenden bytes
+	if (onoff)dcc_data[1] |= (1 << 3); //bit3 van instructiebyte
+	dcc_data[1] |= (channel << 1); //bit 1 en 2 van instructiebyte
+	if (poort)dcc_data[1] &= ~(1 << 0); //bit 0 van instructiebyte
+	dcc_data[2] = dcc_data[0] ^ dcc_data[1]; //bereken checksum byte 3
+	dcc_aantalBytes = 2; //geef aab hoeveel bytes te verzenden (+1)
+	count_repeat = 4; //Geeft aan hoe vaak herhalen verzenden command
+	GPIOR0 |= (1 << 2); //start zenden accessoire, flag verzenden command bezig	
 }
-
 void DCC_accAdres(byte da) {
+	//zet decoderadres in te verzenden databytes
 	dcc_data[0] = 0x00;
 	dcc_data[1] = B11110001;
 	//adres bepalen, max 255 decoderadressen
@@ -476,6 +467,7 @@ void LOC_calc(byte loc) {
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //only when enabled
 }
 void LOC_exe() {
+	//Het automatisch proces, berekend vanuit de acties van een locomotief
 	byte loc = 0; byte changed; byte route = 0; byte tmp; byte goal = 0x00; boolean tb; byte a = 0; byte bc = 0;
 	GPIOR1 ^= (1 << 2); //toggle active loc
 	if (GPIOR1 & (1 << 2))loc = 1;
@@ -816,6 +808,7 @@ void SET_seinoff(byte loc) {
 }
 void INIT_wissels() {
 	//initialiseert de aangesloten wissels en seinen, false is wissels
+	//in Versie 2.01 init van wissels eruit gehaald.
 	if (GPIOR0 & (1 << 2)) return;//als verwerken vorige DCC commando klaar is
 
 	//if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
@@ -840,8 +833,8 @@ void INIT_wissels() {
 		//}
 	//}
 }
-
 void autostart() {
+	//Als goed is afgesloten kan automatisch proces worden gestart met alleen starten van de locs.
 	if (MEM_reg & (1 << 2)) { //autostop niet gelukt, wis stations
 		LOC[0].station = 0;
 		LOC[1].station = 0;
@@ -865,10 +858,12 @@ byte MELDERS() {
 	melder = melder + pos_melders[1];
 	return melder;
 }
-void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
+void DCC_cv(boolean type, byte adres, byte cv, byte value) { 
+	//CV programming om instellingen van locomotieven of accessoire decoders te kunnen wijzigen
 	//type loco= true, acc is false
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
+	
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
 	if (type) { //locomotive
@@ -891,7 +886,7 @@ void DCC_cv(boolean type, byte adres, byte cv, byte value) { //CV programming
 		count_repeat = 4;
 	}
 }
-void PRG_dec() {
+void PRG_dec() { //routine in het schakelproces.
 	switch (PRG_fase) {
 	case 0: //Instellen DCC adres
 		switch (PRG_level) {
@@ -984,7 +979,7 @@ void PRG_dec() {
 		break;
 	}
 }
-void PRG_inc() {
+void PRG_inc() { //routine in schakelproces
 	switch (PRG_fase) {
 	case 0: //inc DCC adres van loc, wissels of seinen
 		switch (PRG_level) {
@@ -2253,7 +2248,7 @@ void loop() {
 				count_slot = 0;
 				//Serial.println(MELDERS(), BIN);
 				if (MELDERS() & (1 << 7)) {
-					if(slotstatus & (1<<7))slotstatus = B00000001;
+					if (slotstatus & (1 << 7))slotstatus = B00000001;
 				}
 				else {
 					if (~slotstatus & (1 << 7))slotstatus = B10000011;
@@ -2268,7 +2263,7 @@ void loop() {
 				DCC_acc(false, true, s, slotstatus & (1 << 1));
 				//wissel, aan, channel 4(dus volgend decoderadres) + 0 of 1, rechtdoor of afslaand.
 				slotstatus ^= (1 << 2);  //volgende servo 
-				if (~slotstatus & (1 << 2))slotstatus &=~(15 << 0); //klaar, slot, servos zetten verlaten 
+				if (~slotstatus & (1 << 2))slotstatus &= ~(15 << 0); //klaar, slot, servos zetten verlaten 
 			}
 		}
 
