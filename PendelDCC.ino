@@ -11,13 +11,20 @@ S
 Versions:
 PendelD.ino V1.01 july 2020
 
-Version V2.01  toevoegingen tbv van draaischijf module
+Version V2.01 oktober 2021
+toevoegingen tbv van draaischijf module
 -Version zichtbaar in display welcome
 -in diverse. Nieuwe instelling voor M8 als melder 8 of als acc rdy  (accessoire ready) geeft aan dat accessoire(s) klaar
 zijn met instellen. Als klaar dan is M8 HOOG.
 -In diverse:  Doorrijden na melder instellen als factor 'drf' per locomotief
 -In diverse Slot stuurt 2 DCC accessoires aan als M8 wordt geactiveerd, voor grendelen of spoorweg bomen.
 -In diverse Stoptijd, limiteerd de max wachttijd tussen twee ritten
+Melder mode 8 wordt 2x gelezen.
+
+
+
+
+
 */
 
 //libraries
@@ -811,27 +818,27 @@ void INIT_wissels() {
 	//in Versie 2.01 init van wissels eruit gehaald.
 	if (GPIOR0 & (1 << 2)) return;//als verwerken vorige DCC commando klaar is
 
-	//if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
+	if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
 		//seinen
-	SET_sein(prg_sein, true);
-	prg_sein++;
-	if (prg_sein > 15) {
-		prg_sein = 0;
-		autostart();
-		GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
+		SET_sein(prg_sein, true);
+		prg_sein++;
+		if (prg_sein > 15) {
+			prg_sein = 0;
+			autostart();
+			GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
+		}
 	}
-	//}
-	//else {
+	else {
 		//wissels telkens 1 wissel
-		//DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
-		//DCC_acc(false, true, prg_wissels, false); //V2.01 wissels 1 kant uit
-		//GPIOR1 ^= (1 << 6);
-		//if (~GPIOR1 & (1 << 6))prg_wissels++;
-		//if (prg_wissels > 4) {
-		//	prg_wissels = 0;
-		//	GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
-		//}
-	//}
+		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
+		DCC_acc(false, true, prg_wissels, false); //V2.01 wissels 1 kant uit
+		GPIOR1 ^= (1 << 6);
+		if (~GPIOR1 & (1 << 6))prg_wissels++;
+		if (prg_wissels > 5) { //decoder adres 1 1~4  en adres 2 1~2
+			prg_wissels = 0;
+			GPIOR1 |= (1 << 7); //exit wissel init, naar seinen				
+		}
+	}
 }
 void autostart() {
 	//Als goed is afgesloten kan automatisch proces worden gestart met alleen starten van de locs.
@@ -858,12 +865,12 @@ byte MELDERS() {
 	melder = melder + pos_melders[1];
 	return melder;
 }
-void DCC_cv(boolean type, byte adres, byte cv, byte value) { 
+void DCC_cv(boolean type, byte adres, byte cv, byte value) {
 	//CV programming om instellingen van locomotieven of accessoire decoders te kunnen wijzigen
 	//type loco= true, acc is false
 	//1110CCVV 0 VVVVVVVV 0 DDDDDDDD
 	//old adres alleen bij first zetten van 
-	
+
 	cv = cv - 1;
 	GPIOR0 |= (1 << 2);
 	if (type) { //locomotive
@@ -2227,6 +2234,27 @@ void TXT(byte t) {
 		break;
 	}
 }
+void M_status() {
+	count_slot++;
+	if (count_slot > 50) {
+		count_slot = 0;
+		if (MELDERS() & (1 << 7)) { //melder 8 hoog
+			slotstatus |= (1 << 5); //temp opslaan
+		}
+		else {
+			slotstatus &= ~(1 << 5); //temp
+		}
+
+		slotstatus ^= (1 << 6); //flip counter, 2x meting doen		
+		if (slotstatus & (1 << 6)) {
+			if (~slotstatus & (1 << 7) && slotstatus & (1 << 5))
+				slotstatus = B10000001; //als 2 gelijke aan metingen
+		}
+		else if (slotstatus & (1 << 7) && ~slotstatus & (1 << 5)) {
+			slotstatus = B00000011; //na 2 gelijke uit metingen
+		}
+	}
+}
 void loop() {
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
 	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
@@ -2243,17 +2271,7 @@ void loop() {
 			//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant, bit 7 oude stand
 			//hier de servo aansturing
 		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
-			count_slot++;
-			if (count_slot > 50) {
-				count_slot = 0;
-				//Serial.println(MELDERS(), BIN);
-				if (MELDERS() & (1 << 7)) {
-					if (slotstatus & (1 << 7))slotstatus = B00000001;
-				}
-				else {
-					if (~slotstatus & (1 << 7))slotstatus = B10000011;
-				}
-			}
+			M_status();
 		}
 
 		if (slotstatus & (1 << 0)) { //bit0 true servoos omzetten
