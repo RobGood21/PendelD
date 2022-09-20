@@ -57,7 +57,7 @@ bit1 Autostart actief (false) TRue = niet actief
 bit2 Auto stop goed uitgevoerd false, niet goed uitgevoerd = true
 bit3 true: M8=melder 8 false: M8= accessoire ready, M8 true gaan locs rijden (alleen de start) 
 bit4 true: Slot UIT bv.servoos false: slot aan	
-
+bit5 true: Geen INIT uitvoeren, false: wel INIT uitvoeren (bug28nov)
 
 
 

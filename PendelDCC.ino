@@ -21,7 +21,9 @@ zijn met instellen. Als klaar dan is M8 HOOG.
 -In diverse Stoptijd, limiteerd de max wachttijd tussen twee ritten
 Melder mode 8 wordt 2x gelezen.
 
-
+debugging
+26okt aantal commands in accessoire verhoogd naar 8 werkt niet fout wordt ernstiger verlaagt naar 3
+28nov
 
 
 
@@ -171,7 +173,8 @@ void setup() {
 	TIMSK2 |= (1 << 1);
 	PORTB |= (1 << 0); //set pin8 high
 	if (PINC == 54)Factory(); //holding button 1 and 4 starts EEPROM reset
-	GPIOR1 &= ~(1 << 4);
+	GPIOR1 &= ~(1 << 4); //bug28nov
+   //GPIOR1 |= (1 << 4);
 	MEM_read();
 	//init
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
@@ -441,7 +444,7 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	if (poort)dcc_data[1] &= ~(1 << 0); //bit 0 van instructiebyte
 	dcc_data[2] = dcc_data[0] ^ dcc_data[1]; //bereken checksum byte 3
 	dcc_aantalBytes = 2; //geef aab hoeveel bytes te verzenden (+1)
-	count_repeat = 4; //Geeft aan hoe vaak herhalen verzenden command
+	count_repeat = 3; //Geeft aan hoe vaak herhalen verzenden command 26okt
 	GPIOR0 |= (1 << 2); //start zenden accessoire, flag verzenden command bezig	
 }
 void DCC_accAdres(byte da) {
@@ -815,7 +818,6 @@ void SET_seinoff(byte loc) {
 }
 void INIT_wissels() {
 	//initialiseert de aangesloten wissels en seinen, false is wissels
-	//in Versie 2.01 init van wissels eruit gehaald.
 	if (GPIOR0 & (1 << 2)) return;//als verwerken vorige DCC commando klaar is
 
 	if (GPIOR1 & (1 << 7)) { //use algemene boolean voor wissels/seinen
@@ -824,14 +826,14 @@ void INIT_wissels() {
 		prg_sein++;
 		if (prg_sein > 15) {
 			prg_sein = 0;
-			autostart();
+			autostart(); //starten in bedrijf
 			GPIOR1 &= ~(1 << 7); //Boolean vrijmaken voor gebruik ergens anders
 		}
 	}
 	else {
 		//wissels telkens 1 wissel
 		DCC_acc(false, true, prg_wissels, GPIOR1 & (1 << 6));
-		DCC_acc(false, true, prg_wissels, false); //V2.01 wissels 1 kant uit
+		//DCC_acc(false, true, prg_wissels, false); //V2.01 wissels 1 kant uit 26okt
 		GPIOR1 ^= (1 << 6);
 		if (~GPIOR1 & (1 << 6))prg_wissels++;
 		if (prg_wissels > 5) { //decoder adres 1 1~4  en adres 2 1~2
@@ -855,7 +857,7 @@ void autostart() {
 	}
 	MEM_reg |= (1 << 2);
 	EEPROM.update(250, MEM_reg);
-	GPIOR1 |= (1 << 4); //exit init_wissels
+	GPIOR1 |= (1 << 4); //exit init_wissels bug28nov
 	DSP_pendel(); //1e dsp_pendel na opstarten
 	GPIOR0 &= ~(1 << 5); //Enable DSP update
 }
@@ -982,7 +984,7 @@ void PRG_dec() { //routine in het schakelproces.
 		break;
 	case 5: //diverse instellingen tbv MEM_reg
 		prg_diverse++;
-		if (prg_diverse > 7)prg_diverse = 0;
+		if (prg_diverse > 8)prg_diverse = 0;
 		break;
 	}
 }
@@ -1088,11 +1090,14 @@ void PRG_inc() { //routine in schakelproces
 			LOC[1].drf++;
 			if (LOC[1].drf > 12)LOC[1].drf = 1;
 			break;
-		case 6:
+		case 6: //Slot aan of uit, zend twee dcc commands
 			MEM_reg ^= (1 << 4);
 			break;
 		case 7: //stoptijd gaat met 10 vermedigvuldig
 			stoptijd++; if (stoptijd > 20)stoptijd = 0;
+			break;
+		case 8: //Initialisatie aan of uit 
+			MEM_reg ^= (1 << 5); 
 			break;
 
 		default: //MEM_reg booleans
@@ -1230,7 +1235,8 @@ void SW_PRG(byte sw) {
 	byte b = 0; //bit in sein selectie
 	switch (PRG_level) {
 		//++++++++LEVEL 1
-	case 1:	//Soort instelling	
+	case 1:	//Soort instelling, programmering
+
 		switch (sw) {
 		case 0:
 			PRG_fase--;
@@ -1785,6 +1791,15 @@ void DSP_prg() {
 				TXT(47); regel2;
 				display.print(stoptijd);
 				break;
+			case 8:
+				TXT(37); regel2;
+				if (MEM_reg & (1 << 5)) {
+					TXT(42); //uit
+				}
+				else {
+					TXT(41); //aan
+				}
+				break;
 			}
 			buttons = 6;
 			break;
@@ -2190,6 +2205,9 @@ void TXT(byte t) {
 	case 36:
 		display.print(F(">     *     V      X"));  //prg diverse seinen mode mono/dual
 		break;
+	case 37:
+		display.print(F("Init"));//initialisatie bij power-up
+		break;
 	case 40:
 		display.print(F("auto "));
 		break;
@@ -2296,11 +2314,16 @@ void loop() {
 					}
 				}
 				else {
-					if (GPIOR1 & (1 << 4)) {
+					if (GPIOR1 & (1 << 4)) {  //bug28nov
 						LOC_exe();
 					}
 					else {
-						INIT_wissels();
+						if (MEM_reg & (1 << 5)) { //initialise at startup off
+							autostart();
+						}
+						else { //init at startup on
+							INIT_wissels();
+						}
 					}
 				}
 
