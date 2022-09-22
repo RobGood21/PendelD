@@ -25,6 +25,11 @@ debugging
 26okt aantal commands in accessoire verhoogd naar 8 werkt niet fout wordt ernstiger verlaagt naar 3
 28nov
 
+V2.02 21sept2022
+Snelheid en drf doorrijden, sterk vereenvoudigd, werkt zo veel smoother, 
+en kans op te vroeg stoppen verminderd.
+
+
 
 
 */
@@ -36,7 +41,7 @@ debugging
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V2.01" //tonen tijdens opstarten
+#define version "V2.02" //tonen tijdens opstarten
 #define cd display.clearDisplay() //verkorte txt
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
@@ -142,6 +147,9 @@ byte rt_sel;
 byte slotstatus = 0; //bit0 uitvoeren bit1 aan of uit bit2 eerste of tweede servo, kant
 byte stoptijd;
 
+//V2.02 
+unsigned long swtime = 0;
+
 void setup() {
 	Serial.begin(9600);
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -174,7 +182,7 @@ void setup() {
 	PORTB |= (1 << 0); //set pin8 high
 	if (PINC == 54)Factory(); //holding button 1 and 4 starts EEPROM reset
 	GPIOR1 &= ~(1 << 4); //bug28nov
-   //GPIOR1 |= (1 << 4);
+	//GPIOR1 |= (1 << 4);
 	MEM_read();
 	//init
 	pos_melders[0] = 0x0F; pos_melders[1] = 0x0F;
@@ -257,7 +265,7 @@ void MEM_read() {
 		if (LOC[i].Vmax > 28)LOC[i].Vmax = 28;
 
 		LOC[i].drf = EEPROM.read(400 + i);
-		if (LOC[i].drf > 12)LOC[i].drf = 1;
+		if (LOC[i].drf > 24)LOC[i].drf = 1;
 
 		//Vlocs, snelheid laden per route
 		for (byte y = 0; y < 12; y++) {
@@ -662,7 +670,7 @@ void LOC_exe() {
 			case 30: //eerste test melders was positief
 				tmp = MELDERS(); //2e x melders testen om spikes uit te vangen
 				if (~tmp & (1 << LOC[loc].goal - 1)) { //stations 1~8  melders 0~7// station bereikt				
-				//Vloc aanpassen...
+					//Vloc aanpassen...
 					GPIOR1 &= ~(1 << 7); //use temp boolean
 					if (LOC[loc].velo == LOC[loc].Vmin) { //stopt in minimale snelheid
 						if (LOC[loc].slowcount > 3) {
@@ -681,26 +689,42 @@ void LOC_exe() {
 						EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
 					}
 					GPIOR1 &= ~(1 << 7); //release temp boolean
-					//restsnelheid bepalen, doorrijden					
+					//restsnelheid bepalen, doorrijden	
+
+					//V2.02 22sept2022 sterk vereenvoudigd.
+					if (LOC[loc].velo > 1) {
+						LOC[loc].velo = 1;
+					}
+					LOC[loc].wait = 5 + LOC[loc].drf;
+
+					/*
 					switch (LOC[loc].velo) {
 					case 1:
-						LOC[loc].wait = 5 * LOC[loc].drf; //tijd van doorrijden??? was 5
+						LOC[loc].wait = 5 + LOC[loc].drf; //tijd van doorrijden??? was 5 //V2.02 + ipv *
+						//in v2.02 21-9 optellen ipv vermenigvuldigen
 						break;
 					case 2:
 						LOC[loc].velo = 1; LOC_calc(loc);
-						LOC[loc].wait = 3 * LOC[loc].drf;
+						LOC[loc].wait = 3 + LOC[loc].drf;
 						break;
 					case 3:
 						LOC[loc].velo = 1; LOC_calc(loc);
-						LOC[loc].wait = 2 * LOC[loc].drf;
+						LOC[loc].wait = 2 + LOC[loc].drf;
 						break;
 
 					default:
 						tmp = 0;
-						LOC[loc].wait = 0;
-						LOC[loc].velo = 0; LOC_calc(loc);
+						//versie voor V2.02
+						//LOC[loc].wait = 0;
+						//LOC[loc].velo = 0; LOC_calc(loc);
+						// 
+						// V2.02 22/9 niet direct stoppen
+						LOC[loc].velo = 1; LOC_calc(loc);
+						LOC[loc].wait = 3 + LOC[loc].drf;
 						break;
 					}
+					*/
+					
 					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven		
 					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
 						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
@@ -1084,11 +1108,11 @@ void PRG_inc() { //routine in schakelproces
 			break;
 		case 4://drf loc1
 			LOC[0].drf++;
-			if (LOC[0].drf > 12)LOC[0].drf = 1;
+			if (LOC[0].drf > 24)LOC[0].drf = 1;
 			break;
 		case 5: //drf loc2
 			LOC[1].drf++;
-			if (LOC[1].drf > 12)LOC[1].drf = 1;
+			if (LOC[1].drf > 24)LOC[1].drf = 1;
 			break;
 		case 6: //Slot aan of uit, zend twee dcc commands
 			MEM_reg ^= (1 << 4);
@@ -1097,7 +1121,7 @@ void PRG_inc() { //routine in schakelproces
 			stoptijd++; if (stoptijd > 20)stoptijd = 0;
 			break;
 		case 8: //Initialisatie aan of uit 
-			MEM_reg ^= (1 << 5); 
+			MEM_reg ^= (1 << 5);
 			break;
 
 		default: //MEM_reg booleans
@@ -1165,18 +1189,18 @@ void SW_exe() {
 			else {
 				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
 
-			//	if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
-			//		if (changed & (1 << 3)) { //bit3 veranderd, M8
-			//			if (poort & (1 << 3)) {
-			//				slotstatus = 1; //schakeld in loop de 2 dcc adressen voor het slot
-			//			}
-			//			else {
-			//				slotstatus = 3;
-			//			}
-			//		}
-			//	}
+				//	if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
+				//		if (changed & (1 << 3)) { //bit3 veranderd, M8
+				//			if (poort & (1 << 3)) {
+				//				slotstatus = 1; //schakeld in loop de 2 dcc adressen voor het slot
+				//			}
+				//			else {
+				//				slotstatus = 3;
+				//			}
+				//		}
+				//	}
 			}
-			if (PRG_fase == 1 & PRG_level == 3)DSP_prg(); //alleen i testmode
+			if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
 		}
 	}
 	else { //switches on poort C lezen
@@ -1904,10 +1928,10 @@ void DSP_prg() {
 					for (byte i = 0; i < 4; i++) {
 
 						if (pos_melders[a] & (1 << i)) {
-							display.drawRect(position + (i * 20), 15 + (a*temp), 12, 12, WHITE);
+							display.drawRect(position + (i * 20), 15 + (a * temp), 12, 12, WHITE);
 						}
 						else {
-							display.fillRect(position + (i * 20), 15 + (a*temp), 12, 12, WHITE);
+							display.fillRect(position + (i * 20), 15 + (a * temp), 12, 12, WHITE);
 						}
 					}
 				}
@@ -2024,8 +2048,8 @@ void TXT_cv3() {
 }
 void DSP_buttons(byte mode) {
 	display.fillRect(0, 50, 128, 64, BLACK); //schoont het onderste stukje display, 
-//seinen veroorzaakt een storing daar, misschien nog eens naar kijken waar het vandaan komt.
-	//waarschijnlijk de conversie van nummer naar txt
+	//seinen veroorzaakt een storing daar, misschien nog eens naar kijken waar het vandaan komt.
+		//waarschijnlijk de conversie van nummer naar txt
 	display.drawRect(0, 50, 128, 14, WHITE);
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
@@ -2035,7 +2059,7 @@ void DSP_buttons(byte mode) {
 		TXT(20);
 		break;
 	case 1: //Pendel, start LOC # S R PDL_fase=0
-			//start moet hier wisselen met stop....
+		//start moet hier wisselen met stop....
 		TXT(25);
 		break;
 	case 2: //functies van de loc PDL_fase 1
@@ -2274,9 +2298,19 @@ void M_status() {
 	}
 }
 void loop() {
+	//V2.02 21-9-2022  sw_exe aparte timer
+
+	//if (millis() - swtime > 10) {
+	//	swtime = millis();
+	//	SW_exe();
+	//}
+
+
+
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
 	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
 		count_slow = 0;
+
 		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
 		//seinen uit zetten, aan einde route
 		if (~GPIOR2 & (1 << 3)) {
@@ -2286,8 +2320,8 @@ void loop() {
 
 		SW_exe(); //switches  verplaatst 21/7
 
-			//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant, bit 7 oude stand
-			//hier de servo aansturing
+		//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant, bit 7 oude stand
+		//hier de servo aansturing
 		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
 			M_status();
 		}
