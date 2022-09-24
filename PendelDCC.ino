@@ -681,21 +681,33 @@ void LOC_exe() {
 					else { //stopt, rijd te snel
 						ROUTE[LOC[loc].route].Vloc[loc]--;// = ROUTE[LOC[loc].route].Vloc[loc] - (LOC[loc].velo - LOC[loc].Vmin);
 						GPIOR1 |= (1 << 7);
+
 					}
+
+
 					if (GPIOR1 & (1 << 7)) {
 						//snelheidverschil groot, nieuwe routetijd opslaan in EEPROM
 						a = 200 + LOC[loc].route;
 						if (loc == 1)a = a + 12;
 						EEPROM.update(a, ROUTE[LOC[loc].route].Vloc[loc]);
+
+
 					}
+
 					GPIOR1 &= ~(1 << 7); //release temp boolean
 					//restsnelheid bepalen, doorrijden	
 
 					//V2.02 22sept2022 sterk vereenvoudigd.
-					if (LOC[loc].velo > 1) {
-						LOC[loc].velo = 1;
-					}
+					//if (LOC[loc].velo > 1) {
+					//	LOC[loc].velo = 1;
+					//}
+
+
+					LOC[loc].velo = LOC[loc].Vmin;
 					LOC[loc].wait = 5 + LOC[loc].drf;
+					LOC_calc(loc);
+
+					//drf handmatig aanpassen aan Vmin van de loc
 
 					/*
 					switch (LOC[loc].velo) {
