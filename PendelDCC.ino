@@ -26,9 +26,10 @@ debugging
 28nov
 
 V2.02 21sept2022
-Snelheid en drf doorrijden, sterk vereenvoudigd, werkt zo veel smoother, 
+Snelheid en drf doorrijden, sterk vereenvoudigd, werkt zo veel smoother,
 en kans op te vroeg stoppen verminderd.
 
+V2.03
 
 
 
@@ -41,7 +42,7 @@ en kans op te vroeg stoppen verminderd.
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V2.02" //tonen tijdens opstarten
+#define version "V2.03" //tonen tijdens opstarten
 #define cd display.clearDisplay() //verkorte txt
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
@@ -149,6 +150,7 @@ byte stoptijd;
 
 //V2.02 
 unsigned long swtime = 0;
+
 
 void setup() {
 	Serial.begin(9600);
@@ -729,14 +731,14 @@ void LOC_exe() {
 						//versie voor V2.02
 						//LOC[loc].wait = 0;
 						//LOC[loc].velo = 0; LOC_calc(loc);
-						// 
+						//
 						// V2.02 22/9 niet direct stoppen
 						LOC[loc].velo = 1; LOC_calc(loc);
 						LOC[loc].wait = 3 + LOC[loc].drf;
 						break;
 					}
 					*/
-					
+
 					res_station &= ~(1 << LOC[loc].station - 1);//oude beginstation vrij geven		
 					for (byte i = 0; i < 4; i++) {//wissels vrijgeven
 						if (~ROUTE[LOC[loc].route].wissels & (1 << 7 - i))res_wissels &= ~(1 << i);
@@ -1174,10 +1176,11 @@ void DCC_command() {
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
 }
-void SW_exe() {
+void SW_exe() { //1
 	byte poort; byte changed; byte temp;
-	GPIOR0 ^= (1 << 4);
-	if (GPIOR0 & (1 << 4)) {
+	GPIOR0 ^= (1 << 4); //afwisselend switches en melder lezen
+	if (GPIOR0 & (1 << 4)) { //2
+
 		//DCC enabled switch lezen
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
 			if (~PINB & (1 << 1)) PINB |= (1 << 0); //toggle DCC enabled
@@ -1188,44 +1191,43 @@ void SW_exe() {
 				GPIOR1 &= ~(1 << 3);
 			}
 		}
-		//Melders op poort B (pin 4~7) lezen bezig
-		PIND |= (1 << 3); //toggle pin 3
-		//if (PIND & (1 << 3))temp = 1;
+
+
+		//Melders op poort D (pin 4~7) lezen bezig
+		PIND |= (1 << 3); //toggle pin 3	
 		poort = PIND;
 		poort = poort >> 4; //isolate 1 nibble
-		changed = poort ^ pos_melders[bitRead(PIND, 3)];
-		if (changed > 0) {
-			if (PIND & (1 << 3)) {
-				pos_melders[1] = poort;  //omgekeerd meder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
-			}
-			else {
-				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+		changed = poort ^ pos_melders[bitRead(PIND, 3)]; //iedere doorloop wordt gewisseld tussen melder 0~3 en 4~7
 
-				//	if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
-				//		if (changed & (1 << 3)) { //bit3 veranderd, M8
-				//			if (poort & (1 << 3)) {
-				//				slotstatus = 1; //schakeld in loop de 2 dcc adressen voor het slot
-				//			}
-				//			else {
-				//				slotstatus = 3;
-				//			}
-				//		}
-				//	}
-			}
-			if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
-		}
-	}
-	else { //switches on poort C lezen
-		poort = PINC;
-		changed = poort ^ sw_statusC;
-		for (byte i = 0; i < 4; i++) {
-			if (changed & (1 << i) & ~poort & (1 << i)) {
-				SW_on(i);
-			}
-		}
-		sw_statusC = poort;
-	}
+
+
+		
+
+
+		// oude functie voor versie 2.03
+				if (changed > 0) {
+					if (PIND & (1 << 3)) {
+						pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
+					}
+					else {
+						pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+					}
+					if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
+				}	
 }
+	else { //2 switches on poort C lezen
+	poort = PINC;
+	changed = poort ^ sw_statusC;
+	for (byte i = 0; i < 4; i++) {
+		if (changed & (1 << i) & ~poort & (1 << i)) {
+			SW_on(i);
+		}
+	}
+	sw_statusC = poort;
+	} //2
+} //1
+
+
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
 		GPIOR0 |= (1 << 5); //program mode
@@ -2310,14 +2312,6 @@ void M_status() {
 	}
 }
 void loop() {
-	//V2.02 21-9-2022  sw_exe aparte timer
-
-	//if (millis() - swtime > 10) {
-	//	swtime = millis();
-	//	SW_exe();
-	//}
-
-
 
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
 	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
