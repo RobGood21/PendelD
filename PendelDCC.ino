@@ -35,10 +35,8 @@ V3.01
 Probleem is dat het melder traject niet te kort mag zijn.
 Probleem is dan dat de pendeldcc de melding niet ziet en doorrijd.
 Melding moet worden ingeklokt zodat deze minimaal 1 seconde duurt.
-Best wel geukt, alleen de spookmeldingen worden ook onthouden....
-Hier toch nog naar kijken 
-
-
+Spookmeldingen opgelost, werde veroorzaakt omdat PIN3 werd geschakeld en daarmee de TLP281 actief
+en direct daarna de poort lezen. Dit aangepast.
 
 */
 
@@ -49,7 +47,7 @@ Hier toch nog naar kijken
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V2.03" //tonen tijdens opstarten
+#define version "V3.01" //tonen tijdens opstarten
 #define cd display.clearDisplay() //verkorte txt
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
@@ -159,8 +157,9 @@ byte stoptijd;
 unsigned long swtime = 0;
 
 //V3.01 
-byte Mcount;
-byte old_posmelders[2];
+byte Mcount = 0;
+byte old_posmelders[2] = { 0xFF,0xFF };
+byte SW_volgorde = 0;
 
 
 void setup() {
@@ -173,6 +172,8 @@ void setup() {
 	regel2; display.print(F("PenDelDCC"));
 	DSP_settxt(80, 50, 1); display.print(version);
 	display.display();
+
+	delay(1000); //seconde wachten om de welkomst tekst te kunnen tonen
 
 	//poorten
 	DDRB |= (1 << 3); //set PIN11 as output for DCC 
@@ -1208,16 +1209,14 @@ void Meldertimer() { //zet melders na periode uit
 
 void SW_exe() { //1
 
-	Mcount++;
-	if (Mcount > 100) { //periode 
-		Mcount = 0;
-		Meldertimer();
+	Mcount++; 
+	if (Mcount > 150) { //periode dat de melder ingeklokt blijft
+		Mcount = 0; //reset de teller
+		Meldertimer(); //bepaald of een melder weer moet worden gereset
 	}
-
-	byte poort; byte changed; byte temp;
-	GPIOR0 ^= (1 << 4); //afwisselend switches en melder lezen
-	if (GPIOR0 & (1 << 4)) { //2
-
+	byte poort; byte changed; //byte temp;
+	switch (SW_volgorde) { //teller per doorloop wordt 1 van de drie switch typen gelezen
+	case 0:
 		//DCC enabled switch lezen
 		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
 			if (~PINB & (1 << 1)) PINB |= (1 << 0); //toggle DCC enabled
@@ -1228,50 +1227,28 @@ void SW_exe() { //1
 				GPIOR1 &= ~(1 << 3);
 			}
 		}
+		break;
 
-
-		//Melders op poort D (pin 4~7) lezen bezig
-		PIND |= (1 << 3); //toggle pin 3	
+	case 1:
+		//Lezen van de melders in twee sessies PORTD3 (PIN3) wisseld lezen optoos TLP281 afwisselend 			
 		poort = PIND;
-		poort = poort >> 4; //isolate 1 nibble
-		changed = poort ^ pos_melders[bitRead(PIND, 3)]; //iedere doorloop wordt gewisseld tussen melder 0~3 en 4~7
-
-
-
-		// oude functie voor versie 2.03
-		//if (changed > 0) {
-
-		if (PIND & (1 << 3)) {
-			for (byte i = 0; i < 4; i++) {
-				if (~poort & (1 << i)) pos_melders[1] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
+		poort = poort >> 4; //Bit 7~4 wordt bit 3~0 
+		if (PIND & (1 << 3)) { //welke TLP281 is actief
+			for (byte i = 0; i < 4; i++) { 
+				if (~poort & (1 << i)) pos_melders[0] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
+				//uitzetten gebeurt in Meldertimer()
 			}
-			//pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
 		}
 		else {
 			for (byte i = 0; i < 4; i++) {
-				if (~poort & (1 << i)) pos_melders[0] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
+				if (~poort & (1 << i)) pos_melders[1] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
 			}
-
-			//pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
 		}
-
-
-
-		//<V3.01
-		//if (PIND & (1 << 3)) {
-		//	pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
-		//}
-		//else {
-		//	pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
-		//}
-
-
-
 		if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
-		//} //if changed
+		PIND |= (1 << 3); //toggle pin 3, naar andere TLP281
+		break;	
 
-	}
-	else { //2 switches on poort C lezen
+	case 2:
 		poort = PINC;
 		changed = poort ^ sw_statusC;
 		for (byte i = 0; i < 4; i++) {
@@ -1280,8 +1257,15 @@ void SW_exe() { //1
 			}
 		}
 		sw_statusC = poort;
-	} //2
+
+		break;
+	}
+	SW_volgorde++;
+	if (SW_volgorde > 2)SW_volgorde = 0;
 } //1
+
+
+
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
 		GPIOR0 |= (1 << 5); //program mode
@@ -2368,7 +2352,7 @@ void M_status() {
 void loop() {
 
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
-	if (count_slow > 12000) { //1200 goede waarde voor deze timer		
+	if (count_slow > 10000) { //1200 goede waarde voor deze timer		
 		count_slow = 0;
 
 		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
