@@ -32,9 +32,11 @@ en kans op te vroeg stoppen verminderd.
 V2.03
 
 V3.01
-Probleem is dat het melder traject niet te kort mag zijn. 
-Probleem is dan dat de pendeldcc de melding niet ziet en doorrijd. 
-Melding moet worden ingeklokt zodat deze minimaal 1 seconde duurt. 
+Probleem is dat het melder traject niet te kort mag zijn.
+Probleem is dan dat de pendeldcc de melding niet ziet en doorrijd.
+Melding moet worden ingeklokt zodat deze minimaal 1 seconde duurt.
+Best wel geukt, alleen de spookmeldingen worden ook onthouden....
+Hier toch nog naar kijken 
 
 
 
@@ -155,6 +157,10 @@ byte stoptijd;
 
 //V2.02 
 unsigned long swtime = 0;
+
+//V3.01 
+byte Mcount;
+byte old_posmelders[2];
 
 
 void setup() {
@@ -1181,7 +1187,33 @@ void DCC_command() {
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
 }
+
+void Meldertimer() { //zet melders na periode uit
+	for (byte a = 0; a < 2; a++) {
+		for (byte i = 0; i < 4; i++) {
+			if (~pos_melders[a] & (1 << i)) { //Melder = actief 
+				if (~old_posmelders[a] & (1 << i)) { //melder was bij vorige doorgang ook actief
+					//Melder resetten
+					old_posmelders[a] |= (1 << i); //reset 
+					pos_melders[a] |= (1 << i); //reset melder
+
+				}
+				else { //melder was niet actief bij vorige doorgang, nieuwe melding
+					old_posmelders[a] &= ~(1 << i); //set te onthouden melder
+				}
+			}
+		}
+	}
+}
+
 void SW_exe() { //1
+
+	Mcount++;
+	if (Mcount > 100) { //periode 
+		Mcount = 0;
+		Meldertimer();
+	}
+
 	byte poort; byte changed; byte temp;
 	GPIOR0 ^= (1 << 4); //afwisselend switches en melder lezen
 	if (GPIOR0 & (1 << 4)) { //2
@@ -1206,33 +1238,50 @@ void SW_exe() { //1
 
 
 
-		
-
-
 		// oude functie voor versie 2.03
-				if (changed > 0) {
-					if (PIND & (1 << 3)) {
-						pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
-					}
-					else {
-						pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
-					}
-					if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
-				}	
-}
-	else { //2 switches on poort C lezen
-	poort = PINC;
-	changed = poort ^ sw_statusC;
-	for (byte i = 0; i < 4; i++) {
-		if (changed & (1 << i) & ~poort & (1 << i)) {
-			SW_on(i);
+		//if (changed > 0) {
+
+		if (PIND & (1 << 3)) {
+			for (byte i = 0; i < 4; i++) {
+				if (~poort & (1 << i)) pos_melders[1] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
+			}
+			//pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
 		}
+		else {
+			for (byte i = 0; i < 4; i++) {
+				if (~poort & (1 << i)) pos_melders[0] &= ~(1 << i); //V3.01 alleen AANZETTEN van een melder
+			}
+
+			//pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+		}
+
+
+
+		//<V3.01
+		//if (PIND & (1 << 3)) {
+		//	pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
+		//}
+		//else {
+		//	pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+		//}
+
+
+
+		if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
+		//} //if changed
+
 	}
-	sw_statusC = poort;
+	else { //2 switches on poort C lezen
+		poort = PINC;
+		changed = poort ^ sw_statusC;
+		for (byte i = 0; i < 4; i++) {
+			if (changed & (1 << i) & ~poort & (1 << i)) {
+				SW_on(i);
+			}
+		}
+		sw_statusC = poort;
 	} //2
 } //1
-
-
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
 		GPIOR0 |= (1 << 5); //program mode
