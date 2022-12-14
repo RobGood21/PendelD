@@ -31,11 +31,6 @@ en kans op te vroeg stoppen verminderd.
 
 V2.03
 
-V3.01
-Probleem is dat het melder traject niet te kort mag zijn. 
-Probleem is dan dat de pendeldcc de melding niet ziet en doorrijd. 
-Melding moet worden ingeklokt zodat deze minimaal 1 seconde duurt. 
-
 
 
 */
@@ -1206,29 +1201,29 @@ void SW_exe() { //1
 
 
 
-		
+
 
 
 		// oude functie voor versie 2.03
-				if (changed > 0) {
-					if (PIND & (1 << 3)) {
-						pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
-					}
-					else {
-						pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
-					}
-					if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
-				}	
-}
-	else { //2 switches on poort C lezen
-	poort = PINC;
-	changed = poort ^ sw_statusC;
-	for (byte i = 0; i < 4; i++) {
-		if (changed & (1 << i) & ~poort & (1 << i)) {
-			SW_on(i);
+		if (changed > 0) {
+			if (PIND & (1 << 3)) {
+				pos_melders[1] = poort;  //omgekeerd melder 1/0 dit was 1, ontwikkelomgeving was fout aangesloten
+			}
+			else {
+				pos_melders[0] = poort;  //[PIND & (1 << 3)] = poort;
+			}
+			if (PRG_fase == 1 && PRG_level == 3)DSP_prg(); //alleen i testmode
 		}
 	}
-	sw_statusC = poort;
+	else { //2 switches on poort C lezen
+		poort = PINC;
+		changed = poort ^ sw_statusC;
+		for (byte i = 0; i < 4; i++) {
+			if (changed & (1 << i) & ~poort & (1 << i)) {
+				SW_on(i);
+			}
+		}
+		sw_statusC = poort;
 	} //2
 } //1
 
