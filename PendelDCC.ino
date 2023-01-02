@@ -37,6 +37,13 @@ Probleem is dan dat de pendeldcc de melding niet ziet en doorrijd.
 Melding moet worden ingeklokt zodat deze minimaal 1 seconde duurt.
 Spookmeldingen opgelost, werde veroorzaakt omdat PIN3 werd geschakeld en daarmee de TLP281 actief
 en direct daarna de poort lezen. Dit aangepast.
+V4.01
+bugfixed:
+S1 seinen offset werd niet goed weergegeven 
+
+new:
+Serial verbinding en gegevens uitwisseling met WMapp erbij
+
 
 */
 
@@ -47,14 +54,13 @@ en direct daarna de poort lezen. Dit aangepast.
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 //teksten
-#define version "V3.01" //tonen tijdens opstarten
+#define version "V4.01" //tonen tijdens opstarten
 #define cd display.clearDisplay() //verkorte txt
 #define regel1 DSP_settxt(0, 2, 2) //parameter eerste regel groot
 #define regel2 DSP_settxt(0, 23, 2) //parameter tweede regel groot
 #define regel3 DSP_settxt(10,23,2) //value tweede regel groot
 #define regel1s DSP_settxt(0, 2, 1) //value eerste regel klein
 #define regel2s DSP_settxt(0, 0, 1) //X Y size X=0 Y=0 geen cursor verplaatsing
-
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1); //constructor display
 #define TrueBit OCR2A = 115 //pulsduur true bit
@@ -161,6 +167,10 @@ byte Mcount = 0;
 byte old_posmelders[2] = { 0xFF,0xFF };
 byte SW_volgorde = 0;
 
+//V4.01 //koppeling met WMapp erbij.
+byte command[6];
+byte commandcount;
+bool Poortopen = false;
 
 void setup() {
 	Serial.begin(9600);
@@ -424,6 +434,71 @@ void MEM_cancel() { //cancels, recalls value
 	case 4: //restore route data
 		MEM_readroute();
 		break;
+	}
+}
+
+void Serial_read() {
+	//een connected boolean is niet nodig omdat alleen bij een connection met een DCCmonitor WMapp verder gaat.
+	int inData;
+	while (Serial.available() > 0) {
+		inData = Serial.read();
+
+		if (commandcount > 0) {
+			command[commandcount - 1] = inData;
+			commandcount++;
+			if (commandcount > 6) { //volledig command van 4 bytes ontvangen 1xstart + 4databytes
+				commandcount = 0;
+
+				Command_exe(); //voer commando uit
+			}
+		}
+		else if (inData == 255) { //dus niet groter dan 0 dus 0 en 0xFF
+			//start byte voor command, niks mee doen dus alleen teller omhoog
+			commandcount++; //volgende doorloop counter op 1			
+		}
+	}
+}
+void Command_exe() { //voert hetvia usb ontvangen command uit
+	////////toon ontvangst op display, alleen bij debug
+	//display.clearDisplay();
+	//display.setCursor(5, 5);
+	//display.setTextColor(1);
+	//for (byte i = 0; i < 6; i++) { //command 0~6 zijn der 7
+	//	display.println(command[i]);
+	//}
+	//display.display();
+
+	switch (command[0]) {
+
+	case 1: //rq data, vraag om data
+		switch (command[1]) {
+		case 1: //rq data product id
+			//Maak communicatie mogelijk
+			Poortopen = true;
+			send(101, 20, 254, 254, 254, 254); //send Productid DCCmonitor, no value B11111110 niet gebruikt.
+			break;
+		case 2: //rq datadump 
+			//send data; MEM_reg; Seinen offset; stoptijd; drf1; drf 2 
+			send(102, EEPROM.read(250), EEPROM.read(170), EEPROM.read(410), EEPROM.read(400), EEPROM.read(401));
+			//send data adres loc1; adres loc2; adres wissels; adres seinen, vrij byte
+			send(103, EEPROM.read(100), EEPROM.read(101), EEPROM.read(102), EEPROM.read(103), 254);
+			break;
+		}
+		break;
+	}
+}
+void send(byte b1, byte b2, byte b3, byte b4, byte b5, byte b6) { //stuurt vier bytes over de serial poort
+	//Alleen als Serial communicatie met WMapp er is bit 1 van GPIOR1
+	if (Poortopen) {
+		byte dataout[6] = { 0,0,0,0,0,0 };
+		dataout[0] = 255;
+		dataout[1] = b1;
+		dataout[2] = b2;
+		dataout[3] = b3;
+		dataout[4] = b4;
+		dataout[5] = b5;
+		dataout[6] = b6;
+		Serial.write(dataout, 7);
 	}
 }
 void DCC_write() {
@@ -1188,7 +1263,6 @@ void DCC_command() {
 		dcc_data[2] = dcc_data[0] ^ dcc_data[1];
 	}
 }
-
 void Meldertimer() { //zet melders na periode uit
 	for (byte a = 0; a < 2; a++) {
 		for (byte i = 0; i < 4; i++) {
@@ -1206,7 +1280,6 @@ void Meldertimer() { //zet melders na periode uit
 		}
 	}
 }
-
 void SW_exe() { //1
 
 	Mcount++; 
@@ -1263,9 +1336,6 @@ void SW_exe() { //1
 	SW_volgorde++;
 	if (SW_volgorde > 2)SW_volgorde = 0;
 } //1
-
-
-
 void SW_double() { //called from SW_exe when sw2 and sw3 is pressed simultanus
 	if (PRG_level == 0) {
 		GPIOR0 |= (1 << 5); //program mode
@@ -1835,7 +1905,7 @@ void DSP_prg() {
 			case 2: //Offset sein 1
 				//TXT(33); 
 				TXT(1); display.print("S1"); regel2;
-				display.print(dcc_seinen * 4 + prg_seinoffset);
+				display.print(4*(dcc_seinen-1) + 1 + prg_seinoffset);
 				break;
 			case 3: //mode melder 8
 				display.print(F("mode M8")); regel2;
@@ -2350,7 +2420,7 @@ void M_status() {
 	}
 }
 void loop() {
-
+	Serial_read(); //leest, kijkt of er info is ontvangen op de serial poort
 	count_slow++;//slow events timer, only ISR runs on full speed (generating DCC pulses)
 	if (count_slow > 10000) { //1200 goede waarde voor deze timer		
 		count_slow = 0;
