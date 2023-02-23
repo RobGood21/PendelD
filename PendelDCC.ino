@@ -483,7 +483,7 @@ void ToonCommand() {
 	//for (byte i = 0; i < 6; i++) { //command 0~6 zijn der 7
 	//	display.println(command[i]);
 	//}
-	display.print("tot hier");
+	display.print(LOC[0].station);
 
 	display.display();
 }
@@ -531,7 +531,7 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		}
 		else {
 			LOC[0].reg &= ~(1 << 7);
-			LOC[0].speed &=~ (1 << 5);
+			LOC[0].speed &= ~(1 << 5);
 		}
 
 		//richting is bit 7 van LOC[0].reg
@@ -541,7 +541,7 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		}
 		else {
 			LOC[1].reg &= ~(1 << 7);
-			LOC[1].speed &=~(1 << 5);
+			LOC[1].speed &= ~(1 << 5);
 		}
 
 		LOC[0].Vmin = command[13];
@@ -585,7 +585,60 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 			DSP_prg();
 			MEM_update(); //hier wordt ook het adres schrijven geregeld
 			break;
+
+		case 10: //Druk op knop 3, verzet dus station of start de S&O functie
+
+			if (command[3] == 1) {
+				GPIOR0 &= ~(1 << 7); //loc1 instellen
+			}
+			else {
+				GPIOR0 |= (1 << 7); //loc 2
+			}
+			PDL_fase = 0; //forceer naar de hoofd/start display in pendelen
+			SW_pendel(2); //druk op de knop
+			break;
+
+		case 11: //loc registers
+			if (command[3] == 1) {
+				LOC[0].reg = command[4];
+				GPIOR0 &= ~(1 << 7); //flag voor loc 1 
+				startlocs(0);
+			}
+			else {
+				LOC[1].reg = command[4];
+				GPIOR0 &= ~(1 << 7); //flag voor loc 2
+				startlocs(1);
+			}
+			//LOC[command[3]-1].reg = command[4]; //command[3]=de loc command[4]= de loc.reg van de loc
+			//startlocs(command[3] - 1);
+			DSP_pendel();
+			break;
+		case 12: //loc functions
+
+			if (command[3] == 1) {
+				LOC[0].function = command[4];
+				MEM_loc_update(0);
+			}
+			else {
+				LOC[1].function = command[4];
+				MEM_loc_update(1);
+			}
+
+
+			DSP_pendel();
+			break;
+		case 13: //loc speed
+			if (command[3] == 1) {
+				LOC[0].speed = command[4];
+			}
+			else {
+				LOC[1].speed = command[4];
+			}
+			DSP_pendel();
+			break;
+
 		}
+
 	}
 }
 void SendProductID() {
@@ -619,12 +672,23 @@ void SendInstelling() {
 }
 void SendRijden() {
 	command[0] = 255; //start com
-	command[1] = 6; //aantal bytes AANPASSEN
+	command[1] = 14; //aantal bytes AANPASSEN
 	command[2] = 103;
 	command[3] = LOC[0].station;
 	command[4] = LOC[0].goal;
 	command[5] = LOC[0].route;
-	SendCommand(7);
+	command[6] = LOC[0].reg;
+	command[7] = LOC[0].speed;
+
+	command[8] = LOC[1].station;
+	command[9] = LOC[1].goal;
+	command[10] = LOC[1].route;
+	command[11] = LOC[1].reg;
+	command[12] = LOC[1].speed;
+
+	command[13] = LOC[0].function;
+	command[14] = LOC[1].function;
+	SendCommand(15);
 }
 void SendCommand(byte aantalbytes) {
 	Serial.write(command, aantalbytes);
@@ -700,6 +764,8 @@ void LOC_calc(byte loc) {
 	LOC[loc].speed &= ~(B00011111 << 0); //clear bit 0~4
 	LOC[loc].speed = LOC[loc].speed + speed;
 	if (~GPIOR0 & (1 << 5)) DSP_pendel(); //only when enabled
+
+	SendRijden(); //V401
 }
 void LOC_exe() {
 	//Het automatisch proces, berekend vanuit de acties van een locomotief
@@ -1744,9 +1810,54 @@ void SW_PRG(byte sw) {
 void Eprom_update() { //v401
 	EEPROM.update(250, MEM_reg);
 }
+void startlocs(byte loc) { //vanaf V401 even gehaald uit SW_pendel 
+	//ToonCommand();
+	if (LOC[loc].reg & (1 << 0)) {  //start rijden process
+		LOC[loc].fase = 0;
+		LOC[loc].wait = 0;
+		GPIOR2 &= ~(1 << 5); //disable auto stop S&O
+		MEM_reg |= (1 << 2); //disable auto start
+		Eprom_update(); //v401
+		//EEPROM.update(250, MEM_reg);
+	}
+	else { //stop locomotief
+		LOC[loc].velo = 0; LOC_calc(loc);
+	}
+}
+void VerhoogStation(byte loc) {
+
+	//verhoogd station en beindigd alle claims
+	if (LOC[loc].reg & (1 << 0)) { //loc rijdt
+		GPIOR2 |= (1 << 5); //auto stop actief S&O
+	}
+	else {//loc staat stil
+		//station kiezen
+		//stations vrij geven
+		if (LOC[loc].station > 0)res_station &= ~(1 << LOC[loc].station - 1);
+		if (LOC[loc].goal > 0)res_station &= ~(1 << LOC[loc].goal - 1);
+		LOC[loc].goal = 0; //wis doel en route
+		//wis geblokkeerde wissels?
+		//wis geblokkeerde blokkades?
+
+
+		LOC[loc].station++; //hier  wordt het station verhoogd
+
+		if (res_station & (1 << LOC[loc].station - 1)) LOC[loc].station++; //gereserveerde stations overslaan
+
+		if (LOC[loc].station > 8) {
+			LOC[loc].station = 0;
+			//if (res_station & (1 << 0))LOC[loc].station = 2;
+		}
+		else {
+			res_station |= (1 << LOC[loc].station - 1); //reserveer station
+		}
+	}
+
+}
 void SW_pendel(byte sw) {
 	byte loc = 0;
 	if (GPIOR0 & (1 << 7))loc = 1;
+
 	switch (PDL_fase) {
 	case 0:
 		switch (sw) {
@@ -1754,41 +1865,36 @@ void SW_pendel(byte sw) {
 			GPIOR0 ^= (1 << 7); //toggle loc keuze
 			break;
 		case 1:
-			LOC[loc].reg ^= (1 << 0); //toggle start/stop
-			if (LOC[loc].reg & (1 << 0)) {  //start rijden process
-				LOC[loc].fase = 0;
-				LOC[loc].wait = 0;
-				GPIOR2 &= ~(1 << 5); //disable auto stop
-				MEM_reg |= (1 << 2); //disable auto start
-				Eprom_update(); //v401
-				//EEPROM.update(250, MEM_reg);
-			}
-			else { //stop locomotief
-				LOC[loc].velo = 0; LOC_calc(loc);
-			}
+			LOC[loc].reg ^= (1 << 0);
+			startlocs(loc); //V401
+
 			break;
 		case 2:
 			if (LOC[loc].reg & (1 << 0)) { //loc rijdt
-				//11juni nog geen functie
-				GPIOR2 |= (1 << 5); //auto stop actief
+				GPIOR2 |= (1 << 5); //auto stop actief S&O
 			}
 			else {//loc staat stil
-				//station kiezen
-				//stations vrij geven
-				if (LOC[loc].station > 0)res_station &= ~(1 << LOC[loc].station - 1);
-				if (LOC[loc].goal > 0)res_station &= ~(1 << LOC[loc].goal - 1);
-				LOC[loc].goal = 0; //wis doel en route
-				//wis geblokkeerde wissels?
-				//wis geblokkeerde blokkades?
-				LOC[loc].station++;
-				if (res_station & (1 << LOC[loc].station - 1)) LOC[loc].station++; //gereserveerde stations overslaan
-				if (LOC[loc].station > 8) {
-					LOC[loc].station = 0;
-					//if (res_station & (1 << 0))LOC[loc].station = 2;
-				}
-				else {
-					res_station |= (1 << LOC[loc].station - 1); //reserveer station
-				}
+				VerhoogStation(loc);
+				// 
+				// 
+				////station kiezen
+				////stations vrij geven
+				//if (LOC[loc].station > 0)res_station &= ~(1 << LOC[loc].station - 1);
+				//if (LOC[loc].goal > 0)res_station &= ~(1 << LOC[loc].goal - 1);
+				//LOC[loc].goal = 0; //wis doel en route
+				////wis geblokkeerde wissels?
+				////wis geblokkeerde blokkades?
+
+
+				//LOC[loc].station++;
+				//if (res_station & (1 << LOC[loc].station - 1)) LOC[loc].station++; //gereserveerde stations overslaan
+				//if (LOC[loc].station > 8) {
+				//	LOC[loc].station = 0;
+				//	//if (res_station & (1 << 0))LOC[loc].station = 2;
+				//}
+				//else {
+				//	res_station |= (1 << LOC[loc].station - 1); //reserveer station
+				//}
 			}
 			break;
 		case 3:
