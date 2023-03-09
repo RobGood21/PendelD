@@ -109,6 +109,7 @@ struct route {
 	byte Vloc[2];
 } ROUTE[12];
 
+
 byte res_station; //gereserveerd station
 byte res_wissels; //idem wissels
 byte res_blok; //idem blok
@@ -174,7 +175,7 @@ byte SW_volgorde = 0;
 byte command[20]; //array 32 is rijkelijk te veel, als alles werkt kleiner maken.
 byte commandcount;
 byte AantalBytes;
-//bool Poortopen = false;
+byte old_melders = 0;
 
 void setup() {
 	Serial.begin(9600);
@@ -366,6 +367,7 @@ void MEM_loc_update(byte loc) {
 }
 void MEM_update() { //sets new values/ sends CV 
 	switch (PRG_fase) {
+
 	case 0: //DCC adressen
 
 		// Voor aanpassing tbv. WMapp alle adressen updaten
@@ -415,30 +417,39 @@ void MEM_update() { //sets new values/ sends CV
 		//nog aanpassen zodat alleen bij verlaten van update routes dit wordt gedaan...niet na iedere druk op knop 3
 
 		for (byte i; i < 12; i++) {
-			EEPROM.update(108 + i, ROUTE[i].stationl); //120
-			EEPROM.update(120 + i, ROUTE[i].stationr); //132
-			EEPROM.update(132 + i, ROUTE[i].wissels); //144
-			EEPROM.update(144 + i, ROUTE[i].blokkades); //156
-			EEPROM.update(156 + i, ROUTE[i].melders);//168
-			for (byte b = 0; b < 4; b++) {
-				EEPROM.update(300 + i + (b * 12), ROUTE[i].seinen[b]);
-			}
 
-			//EEPROM.update(168 + i, ROUTE[i].seinen[0]);
-			//EEPROM.update(180 + i, ROUTE[i].seinen[1]);
+			MEM_updateRoute(i); //V401
+			//EEPROM.update(108 + i, ROUTE[i].stationl); //120
+			//EEPROM.update(120 + i, ROUTE[i].stationr); //132
+			//EEPROM.update(132 + i, ROUTE[i].wissels); //144
+			//EEPROM.update(144 + i, ROUTE[i].blokkades); //156
+			//EEPROM.update(156 + i, ROUTE[i].melders);//168
+			//for (byte b = 0; b < 4; b++) {
+			//	EEPROM.update(300 + i + (b * 12), ROUTE[i].seinen[b]);
+			//}
 		}
 		break;
 
 	case 5: // program fase 5 diverse V4.01
-		//EEPROM.update(250, MEM_reg);
-		Eprom_update(); //v401
+		//
 		EEPROM.update(170, prg_seinoffset);
 		EEPROM.update(400, LOC[0].drf);
 		EEPROM.update(401, LOC[1].drf);
 		EEPROM.update(410, stoptijd);
 		break;
 	}
+	EEPROM.update(250, MEM_reg);
 	//DSP_prg(); //V401
+}
+void MEM_updateRoute(byte rte) { //V401 update route per route
+	EEPROM.update(108 + rte, ROUTE[rte].stationl); //120
+	EEPROM.update(120 + rte, ROUTE[rte].stationr); //132
+	EEPROM.update(132 + rte, ROUTE[rte].wissels); //144
+	EEPROM.update(144 + rte, ROUTE[rte].blokkades); //156
+	EEPROM.update(156 + rte, ROUTE[rte].melders);//168
+	for (byte b = 0; b < 4; b++) {
+		EEPROM.update(300 + rte + (b * 12), ROUTE[rte].seinen[b]);
+	}
 }
 void MEM_cancel() { //cancels, recalls value
 	switch (PRG_fase) {
@@ -477,19 +488,22 @@ void Serial_read() {
 }
 void ToonCommand() {
 	cd;
-	display.clearDisplay();
+	//display.clearDisplay();
 	display.setCursor(5, 5);
 	display.setTextColor(1);
 	//for (byte i = 0; i < 6; i++) { //command 0~6 zijn der 7
 	//	display.println(command[i]);
 	//}
-	display.print(LOC[0].station);
+	display.print("okidki");
 
 	display.display();
+	delay(2000);
+
 }
 void Command_exe() { //voert hetvia usb ontvangen command uit
 	////////toon ontvangst op display, alleen bij debug
 	byte t = 0;
+	bool temp;
 	//if(command[0]>1)ToonCommand();
 
 	switch (command[1]) {
@@ -508,13 +522,24 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		case 3: //rijden instelling 
 			SendRijden();
 			break;
+		case 4: //rq data routes
+			if (command[3] == 0) { //rq alle routes
+				for (byte i = 0; i < 12; i++) {
+					SendRoutes(i);
+				}
+			}
+			else {
+				SendRoutes(command[3]-1); //single route rq
+			}
+			break;
+
 		}
 		break; //end for request commands
 
-
-	case 2: //Datapakket ontvangen 
+	case 2: //Datapakket ontvangen instellingen
 		MEM_reg = command[2];
 		prg_seinoffset = command[3];
+
 		stoptijd = command[4];
 		LOC[0].drf = command[5];
 		LOC[1].drf = command[6];
@@ -553,7 +578,10 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		//PRG_fase = 5; //set prg fase
 
 		MEM_update();
-		MEM_loc_update(0); MEM_loc_update(1);
+		MEM_loc_update(0);
+		MEM_loc_update(1);
+
+
 
 		if (GPIOR0 & (1 << 5)) { //program mode
 			DSP_prg();
@@ -561,14 +589,45 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		else { //pendel in bedrijf
 			DSP_pendel();
 		}
-
-
 		//PRG_fase = t; //herstel prg fase		
 		//if (PRG_fase == 5)DSP_prg(); //display vernieuwen	//
 
 		break;
-	case 50: //opdracht
+	case 3: //instelling voor een route ontvangen
+
+		ROUTE[command[2]].stationl = command[3];
+		ROUTE[command[2]].stationr = command[4];
+		ROUTE[command[2]].wissels = command[5];
+
+
+		////kleiner maken? met for loop  maakt helemaal niks nadda uit. 
+		//ROUTE[command[2]].seinen[0] = command[6];
+		//ROUTE[command[2]].seinen[1] = command[7];
+		//ROUTE[command[2]].seinen[2] = command[8];
+		//ROUTE[command[2]].seinen[3] = command[9];
+		
+		for (byte i = 0; i < 4; i++) {
+			ROUTE[command[2]].seinen[i] = command[6 + i];
+		}
+
+		ROUTE[command[2]].melders = command[10];
+		ROUTE[command[2]].blokkades = command[11];
+		ROUTE[command[2]].Vloc[0] = command[12];
+		ROUTE[command[2]].Vloc[1] = command[13];
+
+
+		MEM_updateRoute(command[2]);
+		EEPROM.update(200, ROUTE[command[2]].Vloc[0]); 
+		EEPROM.update(201, ROUTE[command[2]].Vloc[1]);
+
+		//Vloc is een snelheids indicatie van de lengte van een route per loc, misschien iets leuks mee te doen?
+
+		break;
+
+	case 50: //opdracht		
+
 		switch (command[2]) { //type command
+
 		case 1: //schrijf DCC adres in loc
 			PRG_level = 2;
 			PRG_fase = 2;
@@ -584,6 +643,11 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 			}
 			DSP_prg();
 			MEM_update(); //hier wordt ook het adres schrijven geregeld
+			break;
+		case 2:
+			//toggle pin 8 DCC uitsturing aan/uit
+			PINB |= (1 << 0);
+			SendDCCstatus();
 			break;
 
 		case 10: //Druk op knop 3, verzet dus station of start de S&O functie
@@ -635,10 +699,34 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 				LOC[1].speed = command[4];
 			}
 			DSP_pendel();
+
 			break;
 
-		}
+		case 14: //toggle stand van een sein
+			//byte sein = command[3] - 1;
+			command[3]--;
+			temp = true;
+			//GPIOR1 |= (1 << 7); //gebruik bit 7 als temp boolean
+			if (command[3] < 8) {
+				pos_seinen[0] ^= (1 << command[3]);
+				if (pos_seinen[0] & (1 << command[3])) temp = false;//GPIOR1 &= ~(1 << 7); //reset temp boolean
+			}
+			else {
+				pos_seinen[1] ^= (1 << command[3] - 8);
+				if (pos_seinen[1] & (1 << command[3] - 8)) temp = false; //GPIOR1 &= ~(1 << 7); //reset temp boolean
+			}
+			SET_sein(command[3], temp);
+			break;
 
+		case 15: //set wissel command[3]=wissel 0~3  command[4]=stand 0~1
+			temp = false;
+			if (command[4] == 1)temp = true;
+			DCC_acc(false, true, command[3], temp);
+
+			break;
+
+
+		}
 	}
 }
 void SendProductID() {
@@ -648,6 +736,8 @@ void SendProductID() {
 	command[2] = 101; //data is product id
 	command[3] = 20; //productId van PendelDCC
 	SendCommand(4);
+
+	SendDCCstatus();
 }
 void SendInstelling() {
 	command[0] = 255; //start com
@@ -670,9 +760,19 @@ void SendInstelling() {
 	command[17] = LOC[1].Vmax;
 	SendCommand(18);
 }
+void SendMelders() {
+	if (MELDERS() != old_melders) {
+		command[0] = 255;
+		command[1] = 3; //aantal bytes
+		command[2] = 110;
+		command[3] = MELDERS();//pos_melders[2];
+		SendCommand(4);
+	}
+	old_melders = MELDERS();
+}
 void SendRijden() {
 	command[0] = 255; //start com
-	command[1] = 14; //aantal bytes AANPASSEN
+	command[1] = 15; //aantal bytes AANPASSEN
 	command[2] = 103;
 	command[3] = LOC[0].station;
 	command[4] = LOC[0].goal;
@@ -688,10 +788,63 @@ void SendRijden() {
 
 	command[13] = LOC[0].function;
 	command[14] = LOC[1].function;
-	SendCommand(15);
+
+	command[15] = MELDERS();
+	SendCommand(16);
+}
+void SendSein(byte sein, byte stand) {
+	command[0] = 255;
+	command[1] = 4; //aantal bytes
+	command[2] = 111; //data van een sein
+	command[3] = sein;
+	command[4] = stand;
+	SendCommand(5);
 }
 void SendCommand(byte aantalbytes) {
 	Serial.write(command, aantalbytes);
+}
+void SendWissel(byte wissel, byte stand) {
+	command[0] = 255;
+	command[1] = 4;
+	command[2] = 112; //zend een wissel
+	command[3] = wissel;
+	command[4] = stand;
+	SendCommand(5);
+}
+void SendRoutes(byte rte) {
+
+	//ToonCommand();
+	command[0] = 255;
+	command[1] = 15; //aantal bytes
+	command[2] = 120;
+	command[3] = rte;
+	command[4] = ROUTE[rte].stationl;
+	command[5] = ROUTE[rte].stationr;
+	command[6] = ROUTE[rte].wissels;
+	command[7] = ROUTE[rte].seinen[0];
+	command[8] = ROUTE[rte].seinen[1];
+	command[9] = ROUTE[rte].seinen[2];
+	command[10] = ROUTE[rte].seinen[3];
+	command[11] = ROUTE[rte].blokkades;
+	command[12] = ROUTE[rte].melders;
+	command[13] = ROUTE[rte].Vloc[0];
+	command[14] = ROUTE[rte].Vloc[1];
+	SendCommand(16);
+}
+void SendDCCstatus() {
+
+	command[0] = 255;
+	command[1] = 3;
+	command[2] = 113;
+
+	if (PINB & (1 << 0)) { //status DCC on/off
+		command[3] = 1;
+	}
+	else {
+		command[3] = 0;
+	}
+
+	SendCommand(4);
 }
 void DCC_write() {
 	//writes loc adress in locomotive
@@ -722,11 +875,13 @@ void DCC_acc(boolean ws, boolean onoff, byte channel, boolean poort) {
 	}
 	else { //wissels
 		da = dcc_wissels;
+		SendWissel(channel, poort);
 	}
 	while (channel > 3) { //bereken ds als het decoderadres
 		da++;
 		channel = channel - 4; //rest is channel in berekende decoder adres
 	}
+
 	DCC_accAdres(da); //plaats adres in te verzenden bytes
 	if (onoff)dcc_data[1] |= (1 << 3); //bit3 van instructiebyte
 	dcc_data[1] |= (channel << 1); //bit 1 en 2 van instructiebyte
@@ -1060,7 +1215,6 @@ void LOC_exe() {
 					EEPROM.update(260 + loc, LOC[loc].station);
 					if (~LOC[0].reg & (1 << 0) & ~LOC[1].reg & (1 << 0)) {
 						MEM_reg &= ~(1 << 2); //enable autostart
-						Eprom_update();
 						//EEPROM.update(250, MEM_reg); V401
 						PORTB &= ~(1 << 0); //stop DCC signal
 					}
@@ -1111,6 +1265,8 @@ void LOC_exe() {
 	//temp_blok = res_blok;
 }
 void SET_sein(byte sein, boolean stand) {
+	SendSein(sein, stand); //stuur naar WMapp
+
 	if (MEM_reg & (1 << 0)) { //dual stand
 		GPIOR2 |= (1 << 3);
 		sein2 = (sein * 2) + 1;
@@ -1182,8 +1338,7 @@ void autostart() {
 		}
 	}
 	MEM_reg |= (1 << 2);
-	Eprom_update();
-	//EEPROM.update(250, MEM_reg); //V401
+	EEPROM.update(250, MEM_reg); //V401
 
 	GPIOR1 |= (1 << 4); //exit init_wissels bug28nov
 	DSP_pendel(); //1e dsp_pendel na opstarten
@@ -1438,7 +1593,9 @@ void DCC_command() {
 	byte loc = 0;
 	if (GPIOR0 & (1 << 2)) { //Send CV or basic accessoire
 		count_repeat--;
-		if (count_repeat > 4) GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
+		if (count_repeat > 4) {
+			GPIOR0 &= ~(1 << 2); //end CV, accessoire transmit
+		}
 	}
 	else { //send loc data
 		count_command++;
@@ -1466,13 +1623,16 @@ void DCC_command() {
 	}
 }
 void Meldertimer() { //zet melders na periode uit
+	SendMelders(); //stuurt melder instelling data over de serial poort naar WMapp
 	for (byte a = 0; a < 2; a++) {
 		for (byte i = 0; i < 4; i++) {
 			if (~pos_melders[a] & (1 << i)) { //Melder = actief 
 				if (~old_posmelders[a] & (1 << i)) { //melder was bij vorige doorgang ook actief
 					//Melder resetten
+
 					old_posmelders[a] |= (1 << i); //reset 
 					pos_melders[a] |= (1 << i); //reset melder
+
 
 				}
 				else { //melder was niet actief bij vorige doorgang, nieuwe melding
@@ -1494,8 +1654,15 @@ void SW_exe() { //1
 	switch (SW_volgorde) { //teller per doorloop wordt 1 van de drie switch typen gelezen
 	case 0:
 		//DCC enabled switch lezen
-		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) {
-			if (~PINB & (1 << 1)) PINB |= (1 << 0); //toggle DCC enabled
+		if ((PINB & (1 << 1)) != (GPIOR1 & (1 << 3))) { //drukknop niet gelijk aan flag 
+			if (~PINB & (1 << 1)) {
+				PINB |= (1 << 0); //toggle DCC enabled als drukknop is gedrukt
+
+				SendDCCstatus();
+
+			}
+
+			//flag aanpassen, geeft de oude stand van de drukknop
 			if (PINB & (1 << 1)) {
 				GPIOR1 |= (1 << 3);
 			}
@@ -1807,9 +1974,6 @@ void SW_PRG(byte sw) {
 	}
 	if (~GPIOR1 & (1 << 1)) DSP_prg();
 }
-void Eprom_update() { //v401
-	EEPROM.update(250, MEM_reg);
-}
 void startlocs(byte loc) { //vanaf V401 even gehaald uit SW_pendel 
 	//ToonCommand();
 	if (LOC[loc].reg & (1 << 0)) {  //start rijden process
@@ -1817,8 +1981,7 @@ void startlocs(byte loc) { //vanaf V401 even gehaald uit SW_pendel
 		LOC[loc].wait = 0;
 		GPIOR2 &= ~(1 << 5); //disable auto stop S&O
 		MEM_reg |= (1 << 2); //disable auto start
-		Eprom_update(); //v401
-		//EEPROM.update(250, MEM_reg);
+		EEPROM.update(250, MEM_reg);
 	}
 	else { //stop locomotief
 		LOC[loc].velo = 0; LOC_calc(loc);
@@ -2709,8 +2872,18 @@ void loop() {
 
 
 
-		if (PINB & (1 << 2))PORTB &= ~(1 << 0); //disable H-bridge if short
+		if (PINB & (1 << 2) && PINB & (1 << 0)) { //V401
+			//bug oude versie zet continue pin 8 naar nul
+			PORTB &= ~(1 << 0); //disable H-bridge if short
+			SendDCCstatus(); //zend status naar WMapp
+		}
+
+
+		//
+
+
 		//seinen uit zetten, aan einde route
+
 		if (~GPIOR2 & (1 << 3)) {
 			if (GPIOR2 & (1 << 1))SET_seinoff(0);
 			if (GPIOR2 & (1 << 2))SET_seinoff(1);
@@ -2720,7 +2893,7 @@ void loop() {
 
 		//Slotstatus=bit0 uitvoeren bit1 aan of uit, bit2 eerste of tweede servo, kant, bit 7 oude stand
 		//hier de servo aansturing
-		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld
+		if (~MEM_reg & (1 << 4)) { //slot ingeschakeld bit 3 en bit 4 false V401
 			M_status();
 		}
 

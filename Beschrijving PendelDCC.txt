@@ -48,6 +48,7 @@ A4	display SDA
 A5	display SCK
 
 dcc_commandreg
+
 bit710 command valid true, zenden, bij false idle byte sturen
 bit6 true lok command, blijven herhalen
 
@@ -58,7 +59,6 @@ bit2 Auto stop goed uitgevoerd false, niet goed uitgevoerd = true
 bit3 true: M8=melder 8 false: M8= accessoire ready, M8 true gaan locs rijden (alleen de start) 
 bit4 true: Slot UIT bv.servoos false: slot aan	
 bit5 true: Geen INIT uitvoeren, false: wel INIT uitvoeren (bug28nov)
-
 
 
 Com reg GPIOR0
