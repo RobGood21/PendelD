@@ -593,6 +593,7 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		//if (PRG_fase == 5)DSP_prg(); //display vernieuwen	//
 
 		break;
+
 	case 3: //instelling voor een route ontvangen
 
 		ROUTE[command[2]].stationl = command[3];
@@ -621,7 +622,7 @@ void Command_exe() { //voert hetvia usb ontvangen command uit
 		EEPROM.update(201, ROUTE[command[2]].Vloc[1]);
 
 		//Vloc is een snelheids indicatie van de lengte van een route per loc, misschien iets leuks mee te doen?
-
+		SendReady();
 		break;
 
 	case 50: //opdracht		
@@ -738,6 +739,13 @@ void SendProductID() {
 	SendCommand(4);
 
 	SendDCCstatus();
+}
+void SendReady() {
+	//byte dataout[3];
+	command[0] = 255; //start com
+	command[1] = 2; //aantal bytes
+	command[2] = 10; //data is product id
+	SendCommand(3);
 }
 void SendInstelling() {
 	command[0] = 255; //start com
@@ -1217,6 +1225,7 @@ void LOC_exe() {
 						MEM_reg &= ~(1 << 2); //enable autostart
 						//EEPROM.update(250, MEM_reg); V401
 						PORTB &= ~(1 << 0); //stop DCC signal
+						SendDCCstatus(); //V401
 					}
 					DSP_pendel(); //SendRijden(); //V401
 				}
